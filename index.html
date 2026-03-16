@@ -1,0 +1,1636 @@
+<html>
+
+<head>
+
+<style>
+body {
+  font-family: "Calibri";
+  background-color: #f0f0e0;
+  overflow-y: scroll;
+  margin-right: 20%;
+}
+input[type="range"] {
+  background-color: #d0e0d0;
+  accent-color: #586858;
+  width: 35%;
+}
+table,th,td {
+  border-collapse: collapse;
+  padding: 2px;
+}
+input[type="text"] {
+  width: 80px;
+}
+.breadcrumb {
+  min-width: 80px;
+  background-color: #484;
+  color: white;
+  text-align: center;
+  font-size: 85%;
+  border-color: white;
+}
+dialog::backdrop {
+  /*backdrop-filter: blur(0.5px)*/
+  background-color: hsl(60, 40%, 50%, 0.2);
+}
+dialog {
+  background-color: #e8ece8;
+}
+[aria-label="close"] {
+  appearance: none;
+  background-color: #fcc;
+  float: right;
+  border: 1px solid;
+  border-radius: 50%;
+}
+.prContainter {
+  /*
+  white-space: nowrap;
+  width:600px;
+  height:400px;
+  */
+  overflow-x: scroll;
+  overflow-y: auto;
+}
+.prContent {
+  width:1000px;
+  height:500px;
+  display: block;
+  white-space: nowrap;
+  overflow-y: scroll;
+  overflow-x: scroll;
+  font-family: monospace;
+}
+.prIndex {
+  display: inline-block;
+  min-width: 30px;
+}
+.prWord {
+  display: inline-block;
+  min-width: 100px;
+}
+.HiLite {
+  background-color: yellow;
+}
+.HiLiteChange {
+  background-color: #cfc;
+}
+.pattern_input {
+  font-family: "Consolas";
+  font-size: 110%;
+}
+#rangeStretch {
+  width: 100%;
+}
+#divWord, #spanPatternWord {
+  font-size: 200%;
+  font-family: "TEST_FONT";
+}
+#divUnicode, #spanPatternUnicode {
+  font-family: "Consolas";
+  font-size: 70%;
+}
+
+
+</style>
+</head>
+
+<body>
+
+<h1>GPOS Editor <font color='red'>&alpha;</font></h1>
+
+<script type="text/javascript" src="./js/hbjs-12.3.0/hb.js"></script> <!-- Module - REQUIRED -->
+<script type="text/javascript" src="./js/hbjs.js"></script> <!-- Wrapper, can be used without -->
+<script type="text/javascript" src="./js/svghandler.js"></script>
+<script type="text/javascript" src="./js/progresspanel.js"></script>
+<script type="text/javascript" src="./js/doubletap.js"></script>
+<script type="text/javascript" src="./js/dragdrop.js"></script>
+<script type="text/javascript" src="./js/shortcut.js"></script>
+
+<script type="module" async defer>
+'use strict';
+
+import { HarfBuzzShaping, jsonToSvg } from './js/hbshaping.mjs';
+import { CPaths64, HarfBuzzGlyphs, Clipper2Z, clipperGC } from './js/hbclipper.mjs';
+import { FontForceField, FORCEFIELD_QUALITY } from './js/fontforcefield.mjs';
+import { lcsWithGapConstraints } from './js/lcsgap.mjs';
+import { WordListEntry, WordList } from './js/wordlist.mjs';
+import JSON5 from './js/json5.index.min.mjs';
+//import { BSON, EJSON } from './js/bson.mjs';
+
+const hbs = new HarfBuzzShaping;
+const hbs2 = new HarfBuzzShaping;
+
+const hbg = new HarfBuzzGlyphs;
+const fff = new FontForceField(hbg);
+
+const wordList = new WordList(hbs, fff);
+
+const promises = [
+  createHarfBuzz()
+  ];
+
+Promise.all(promises).then(([aModuleHarfBuzz]) => {
+  window.hb = hbjs(aModuleHarfBuzz);
+  hbs.setHarfBuzz(window.hb);
+  hbs2.setHarfBuzz(window.hb);
+  hbg.setHarfBuzzShaping(hbs);
+  fff.setHarfBuzzGlyphs(hbg);
+  onResourcesLoaded();
+});
+
+//window.hb = hb;
+window.hbs = hbs;
+window.hbs2 = hbs2;
+
+window.hbg = hbg;
+window.fff = fff;
+window.FORCEFIELD_QUALITY = FORCEFIELD_QUALITY;
+window.clipperGC = clipperGC;
+window.JSON5 = JSON5;
+//window.BSON = BSON;
+//window.EJSON = EJSON;
+window.lcsWithGapConstraints = lcsWithGapConstraints;
+window.wordList = wordList;
+
+
+async function loadFontTo(hbsObject, fontUrl) {
+  const response = await fetch(fontUrl);
+  const blob = await response.arrayBuffer();
+  hbsObject.setFontBlob(blob);
+/*
+  fetch(fontUrl).then(res => {
+    return res.arrayBuffer();
+  }).then(blob => {
+    console.log('loadFontTo', 'done'); //~~~~
+    hbsObject.setFontBlob(blob);
+  });
+*/
+}
+
+async function LoadSampleData() {
+  await loadFontTo(hbs,  'samples/Gulzara-Regular-1.017.ttf');
+  await loadFontTo(hbs2, 'samples/Gulzara-Regular-1.006.ttf');
+  //console.log('onResourcesLoaded', 'loading JSON...'); //~~~~
+  await loadJson('samples/UD_Gulzara_Regular_v1.017.JSON');
+  //btnRun.disabled = false;  
+}
+
+async function onResourcesLoaded() {
+  window.jsonToSvg = jsonToSvg;
+  window.Clipper2Z = Clipper2Z;
+  console.log('onResourcesLoaded', 'loading fonts...'); //~~~~
+  //await LoadSampleData();
+}
+
+function convertLinesToArray(txt) {
+  const lines = txt.split(/\r?\n+/g);
+  const result = [];
+  for (let i=0;i<lines.length;i++) {
+    const line = lines[i];
+    const m = line.match(/^([^\s]?[^#\s]+)/u);  // Extract a word at the beginning - up to a space or hash
+    if (m && m[1]) {
+      result.push(m[1]);
+    }
+  }
+  return result;
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloader = () => resolve(reader.result); // Resolve with content
+    reader.onerror  = () => reject(reader.error);   // Reject on error
+    reader.readAsText(file); // Start reading
+  });
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloader = () => resolve(reader.result); // Resolve with content
+    reader.onerror  = () => reject(reader.error);   // Reject on error
+    reader.readAsArrayBuffer(file); // Start reading
+  });
+}
+
+async function loadWordList(file) {
+  const wordListText = await readFileAsText(file);
+  const words = convertLinesToArray(wordListText);
+  //wordList.addWords(word);
+  window.words = words;
+}
+
+async function loadWordListUrl(url) {
+  const response = await fetch(url);
+  const wordListText = await response.text();
+  const words = convertLinesToArray(wordListText);
+  //wordList.addWords(words);
+  window.words = words;
+}
+
+async function loadJson(url) {
+  const response = await fetch(url);
+  const jsonText = await response.text();
+  console.log('loadJson', 'done'); //~~~~
+  await fff.applyJsonText(jsonText);
+}
+
+//loadWordList('samples/UniqueWords.20260204_082138.txt');
+//--//loadWordListUrl('samples/UniqueWords.20260204_082138.txt');
+
+window.convertLinesToArray = convertLinesToArray;
+
+</script>
+
+<script>
+
+const evaluateOptions = {
+  deeperKerning: true,
+}
+
+const evaluateOptionsFast = {
+  deeperKerning: false,
+}
+
+// polyfill for scheduler.yield
+globalThis.scheduler = globalThis.scheduler || {};
+globalThis.scheduler.yield =
+  globalThis.scheduler.yield ||
+  (() => new Promise((r) => setTimeout(r, 0)));
+
+const breadCrumbs = [];
+
+function breadCrumbAdd(i) {
+  const bi = breadCrumbs.indexOf(i);
+  if (bi>=0) breadCrumbs.splice(bi, 1);
+  breadCrumbs.unshift(i);
+  if (breadCrumbs.length > 12) breadCrumbs.length = 12;
+}
+
+function breadCrumbGoto(bi) {
+  /* Make MRU...
+  const ra = breadCrumbs.splice(i, 1);
+  breadCrumbAdd(ra[0]);
+  */
+  const i = breadCrumbs[bi];
+  //~~//console.log('breadCrumbGoto', bi, i); //~~
+  refreshSVG(null, i, true);
+  return false;
+}
+
+function breadCrumbCreateHtml() {
+  let html = `<table border=2 class='breadcrumb'><tr>`;
+  for (let bi=0; bi<breadCrumbs.length; bi++) {
+    const i = breadCrumbs[bi];
+    const e = wordList.get(i);
+    html += `<td class='breadcrumb' onclick='breadCrumbGoto(${bi});'>#${i}:${e.getWord()}</a></td>`;
+  }
+  html += `</tr></table>`;
+  return html;
+}
+
+function saveTextToFile(txt, filename) {
+  let bb = new Blob([txt], {type: 'text/plain;charset=utf-8'});
+  let a = document.createElement('a');
+  a.download = filename;
+  a.href = window.URL.createObjectURL(bb);
+  a.target='_blank';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function perf(func, ...args) {
+  const ts = performance.now();
+  res = func(...args);
+  const te = performance.now();
+  console.log(te-ts);
+  return res;
+}
+
+async function myYield() {
+  await scheduler.yield();
+}
+
+async function shapeWords(count) {
+  let max = words.length;
+  if (!count || (count > max))
+    count = max;
+
+  progressPanel.start(count, 'Adding');
+  await scheduler.yield();
+  myYield();
+  const ts = performance.now();
+  for (let i=0; i<count; i++) {
+    wordList.addWord(words[i]);
+    if (progressPanel.setProgress(i)) await scheduler.yield();
+    myYield();
+  }
+  progressPanel.done();
+  await scheduler.yield();
+
+  max = wordList.length();
+  if (count > max) count = max;
+  progressPanel.start(count, 'Shaping');
+  await scheduler.yield();
+  myYield();
+  for (let i=0; i<count; i++) {
+    if (!(i%1000)) console.log(`...${Math.round(i/count*100)}%`);
+    wordList.shape(i);
+    if (progressPanel.setProgress(i)) await scheduler.yield();
+    myYield();
+  }
+  progressPanel.done();
+  await scheduler.yield();
+  const te = performance.now();
+  console.log('Time', te-ts);
+}
+
+async function evaluateWords(count) {
+  const max = wordList.length();
+  const ts = performance.now();
+  if (!count || (count > max))
+    count = max;
+  progressPanel.start(count, 'Evaluating');
+  await scheduler.yield();
+  myYield();
+  for (let i=0; i<count; i++) {
+    if (!(i%1000)) console.log(`...${Math.round(i/count*100)}%`);
+    wordList.evaluate(i, evaluateOptions);
+    if (progressPanel.setProgress(i)) await scheduler.yield();
+    myYield();
+  }
+  progressPanel.done();
+  await scheduler.yield();
+  const te = performance.now();
+  console.log('Time', te-ts);
+}
+
+function getRandomInt(max) {
+  return Math.floor(Math.random() * max);
+}
+
+async function run(count=5000) {
+  await shapeWords(count);
+  await evaluateWords(count);
+  refreshSVG(null, 0, true);
+  showStatistics();
+}
+
+
+
+const svgOptions = {};
+
+
+//let currentEntry;
+const current = {
+  entry: null,
+  quality: -1,
+  note: '',
+}
+let showBefore = false;
+
+const DELTAFIELD_COLORS = {
+  none: '',
+  data: '#ff6',
+  edit: '#cfc',
+}
+
+function updateShowBefore(before=false) {
+  if (showBefore === before) return;
+  showBefore = before;
+  if (showBefore) {
+    divGlyphs.style.filter = 'blur(2px)';
+    cbBefore.nextElementSibling.style.color = 'white';
+    cbBefore.nextElementSibling.style.backgroundColor = '#f44';
+  } else {
+    divGlyphs.style.filter = '';    
+    cbBefore.nextElementSibling.style.color = '';
+    cbBefore.nextElementSibling.style.backgroundColor = '';
+  }
+}
+
+function generateDeltaField(we, i, id) {
+  let html = '';
+  let dv = '';
+  const eleId = `df_${i}_${id}`;
+  if (we.delta) {
+    de = we.delta[i];
+    if (de && de[id]) dv = de[id];
+  }
+  const gid = we.hb[i].g;
+  let istyle = DELTAFIELD_COLORS.none;
+  if (wordList.hasDeltaChoices(gid, id)) {
+    let icolor = DELTAFIELD_COLORS.data;
+    if (typeof dv == 'number') icolor = DELTAFIELD_COLORS.edit;
+    istyle =  `style='background-color:${icolor};' `;
+  }
+  html += `<input type='text' id='${eleId}' value='${dv}' list='dc_${id}_${gid}' ${istyle} autocomplete='off'></input> `;
+  html += `${we.hb[i][id]}`;
+  return html;
+}
+
+function generateDataList(gid, idName) {
+  const dci = wordList.getDeltaChoice(gid, idName);
+  if (!dci) return '';
+  let html = '';
+  html += `<datalist id='dc_${idName}_${gid}'>`;
+  dci.forEach(v=>{
+    html += `<option>${v}</option>`;
+  });
+  html += `</datalist>`;
+  return html;
+}
+
+function resetGlyphDelta() {
+  if (!window.confirm('Reset all values for this word?')) return;
+  current.entry.clearDelta();
+  wordList.buildDeltaChoices();
+  refreshSVG(null, null, true);
+  showTrafficLights();
+}
+
+function createGlyphTable(entry) {
+  const hb = entry.hb;
+  const ev = entry.ev.hb;
+  let html = `<table width='100%' border=1>`;
+  html += `<thead><tr><th width='5%'>#</th><th width='5%'>GID</th><th width='3%'>Icon</th><th width='15%'>Name</th><th>dx</th><th>dy</th><th width='24%'>ax</th></tr></thead>`;
+  html += `<tbody>`;
+  const gids = new Set();
+  for (let i=0; i<hb.length; i++) {
+    const e = hb[i];
+    gids.add(e.g);
+    const icons = ev[i]?.icons;
+    html += `<tr><td style='text-align:center;'>${i}</td>`;
+    html += `<td style='text-align:center;'><font color='${fff.getGlyphColor(i)}'>${e.g}</font></td>`;
+    html += `<td style='text-align:center;'>${icons}</td>`;
+    html += `<td><font color='${fff.getGlyphColor(i)}'>${hbs.getGlyphName(e.g)}</font></td>`;
+    html += `<td>${generateDeltaField(entry, i, 'dx')}</td>`;
+    html += `<td>${generateDeltaField(entry, i, 'dy')}</td>`;
+    //if (i < (hb.length-1))
+    {
+      html += `<td>${generateDeltaField(entry, i, 'ax')}`;
+      if (icons.includes(fff.ICONS.island)) {
+        html += fff.ICONS.island;
+      }
+      html += `</td></tr>`;
+    }
+  }
+  html += `</tbody>`;
+  html += `</table>`;
+  //html += `<datalist id='test'><option>50</option><option>70</option><option>100</option></datalist>`;
+  gids.forEach(gid=>{
+    html += generateDataList(gid, 'ax');
+    html += generateDataList(gid, 'dx');
+    html += generateDataList(gid, 'dy');
+  });
+  //html += `<button id='btnReset' onclick='resetGlyphDelta();' style='background-color:#faa;'>Reset All</button>`;
+  return html;
+}
+
+function updateDeltaField(e) {
+  const ele = e.srcElement;
+  const dataset = ele.dataset;
+  const entry = current.entry; //dataset.entry;
+  const i = parseInt(dataset.i);
+  const id = dataset.id;
+
+  const res = entry.updateDelta(i, id, ele.value);
+  if (res) {
+    breadCrumbAdd(wordList.getCurrentIndex(true));
+    ele.style.backgroundColor = DELTAFIELD_COLORS.edit;
+  } else {
+    if (wordList.hasDeltaChoices(parseInt(dataset.g, id)))
+      ele.style.backgroundColor = DELTAFIELD_COLORS.data;
+    else
+      ele.style.backgroundColor = DELTAFIELD_COLORS.none;
+  }
+  //refreshSVG();
+  renderSVG(true);
+  entry.evaluate(wordList, evaluateOptionsFast);
+  showTrafficLights();
+}
+
+function patchDeltaField(entry, i, id) {
+  const eleId = `df_${i}_${id}`;
+  const ele = document.getElementById(eleId);
+  //ele.dataset.entry = entry;
+  if (!ele?.dataset) return;
+  ele.dataset.i = i;
+  ele.dataset.id = id;
+  ele.dataset.g = entry.hb[i].g;
+  ele.addEventListener('input', updateDeltaField);
+}
+
+function patchGlyphTable(entry) {
+  const hb = entry.hb;
+  for (let i=0; i<hb.length; i++) {
+    patchDeltaField(entry, i, 'dx');
+    patchDeltaField(entry, i, 'dy');
+    patchDeltaField(entry, i, 'ax');
+  }
+}
+
+function wrapSvg(svg, dimensions={}) {
+  const { xmin=-250, ymin=-1800, height=3000, heightOut=400, widthOut=undefined } = dimensions;
+  let width = height / heightOut * 0.95;
+  let widthString = '';
+  if (typeof widthOut === 'number') {
+    width = widthOut * width;
+    widthString = `width="${widthOut}px" `
+  } else {
+    width = window.innerWidth * width;
+  }
+  return `<svg main="http://www.w3.org/2000/svg" height="${heightOut}" ${widthString}viewBox="${xmin} ${ymin} ${width} ${height}">${svg}</svg>`;
+  //return `<svg main="http://www.w3.org/2000/svg" height="${heightOut}" viewBox="${xmin} ${ymin} ${width} ${height}">${svg}</svg>`;
+}
+
+
+
+// Handle a delayed update on the glyph tables
+// Along with the time consuming buildDeltaChoices
+let glyphTimeout;
+
+function showTrafficLights() {
+  const qual = current.quality;
+  if (qual == FORCEFIELD_QUALITY.COLLISION_GLYPH /*soe.collision*/) tdTLCollision.style.backgroundColor = '#f33'; else tdTLCollision.style.backgroundColor = '';
+  if (qual == FORCEFIELD_QUALITY.COLLISION_NEAR /*soe.collision*/) tdTLNear.style.backgroundColor = '#f33'; else tdTLNear.style.backgroundColor = '';
+  if (qual == FORCEFIELD_QUALITY.KERNING/*soe.kernBad*/)   tdTLKernBad.style.backgroundColor = '#f82'; else tdTLKernBad.style.backgroundColor = '';
+  if (qual == FORCEFIELD_QUALITY.MAYBE /*soe.kernMaybe*/) tdTLKernMaybe.style.backgroundColor = '#fe4'; else tdTLKernMaybe.style.backgroundColor = '';
+  if (qual == FORCEFIELD_QUALITY.OK /*!soe.collision && !soe.kernBad && !soe.kernMaybe*/)
+    tdTLGood.style.backgroundColor = '#8f4';
+  else
+    tdTLGood.style.backgroundColor = '';  
+}
+
+function delayedGlyphsShow() {  
+  clearTimeout(glyphTimeout);
+  renderSVG(true);
+  wordList.buildDeltaChoices();
+  const entry = wordList.getCurrentEntry();
+  divGlyphs.innerHTML = createGlyphTable(entry);
+  patchGlyphTable(entry);
+}
+
+function prepareGlyphShow() {
+  clearTimeout(glyphTimeout);
+  divGlyphs.innerHTML = '';
+  glyphTimeout = setTimeout(() => {
+    delayedGlyphsShow();
+  }, 100);
+}
+
+function stringToHex(s, gap=' ') {
+  let r = '';
+  for (let i=0; i<s.length; i++) {
+    let hx = s.charCodeAt(i).toString(16);
+    if (hx.length < 4) hx = ('000'+hx).slice(-4);
+    r += hx + gap;
+  }
+  return r;
+}
+
+function renderSVG(full) {
+  const entry = wordList.getCurrentEntry();
+  let hb = entry?.hb;
+  if (!hb) return;
+  current.entry = entry;
+  let svgRes;
+  if (showBefore) {
+    const resBefore = entry.toSVGBefore(wordList, svgOptions, evaluateOptionsFast);
+    current.quality = resBefore.ev?.quality;
+    svgRes = resBefore.svg;
+    current.note = resBefore.note;
+  } else {
+    if (full) {
+      entry.evaluate(wordList, evaluateOptionsFast);
+    }
+    svgRes = entry.toSVG(wordList, svgOptions);
+    current.quality = entry.getQuality();
+    current.note = entry.note;
+  }
+  let svg = svgRes.svg;
+
+  svg = wrapSvg(svg, {
+    //xmin: -250,
+    //ymin: -1800,
+    //height: 3000,
+    //heightOut: 400,
+  });
+  updateSvg(svgResult, svg);
+
+  const word = entry.getWord();
+  divWord.innerText = word;
+  divUnicode.innerText = stringToHex(word);
+  divNote.innerText = current.note;
+
+  if (full) {
+    showStatistics();
+    showTrafficLights();    
+  } else {
+    tdTLCollision.style.backgroundColor = '';
+    tdTLNear.style.backgroundColor = '';
+    tdTLKernBad.style.backgroundColor = '';
+    tdTLKernMaybe.style.backgroundColor = '';
+    tdTLGood.style.backgroundColor = '';        
+  }
+}
+
+function refreshSVG(e, n, forceUpdate) {
+  divBreadCrumbs.innerHTML = breadCrumbCreateHtml();
+  const doUpdate = ((typeof n !== 'undefined') && (n !== wordList.getCurrentIndex(true))) || forceUpdate;
+  if (typeof n === 'number') {
+    wordList.gotoIndex(n, true);
+  }
+
+  renderSVG(false);
+
+  if (doUpdate) {
+    current.entry.clearEdits();
+    prepareGlyphShow();
+  }
+}
+
+function updateRangeStretch(e) {
+  svgOptions.stretch = rangeStretch.value;
+  refreshSVG();
+}
+
+function updateCheckBoxes(e) {
+  svgOptions.glyphColor=    cbColored.checked;
+  svgOptions.showName=      cbName.checked;
+  svgOptions.showGID=       cbGid.checked;
+  svgOptions.showNear=      cbNear.checked;
+  svgOptions.showNearBase=  cbNearBase.checked;
+  svgOptions.showFarBase=   cbFarBase.checked;
+  svgOptions.showFarMarks=  cbFarMarks.checked;
+  svgOptions.showFarAll=    cbFarAll.checked;
+  svgOptions.showCollisions=cbCollisions.checked;
+  svgOptions.showGlue=      cbGlue.checked;
+  //svgOptions.showBefore=    cbBefore.checked;
+  svgOptions.showBase=      cbShowBase.checked;
+  svgOptions.showMark=      cbShowMark.checked;
+  svgOptions.showBaseLine=  cbShowBaseLine.checked;
+  refreshSVG();
+}
+
+let whichNext = 'all';
+
+function gotoWhich(forwards, firstLast) {
+  if (wordList.gotoNext(whichNext, forwards, firstLast)) {
+    refreshSVG(null, wordList.getCurrentIndex(true), true);
+  }
+}
+
+function gotoFirst() {
+  gotoWhich(true, true);
+}
+
+function gotoLast() {
+  gotoWhich(false, true);
+}
+
+function gotoPrev() {
+  gotoWhich(false);
+}
+
+function gotoNext() {
+  gotoWhich(true);
+}
+
+function DateTimeForFilename() {
+  //  012345678901234567890123
+  // '2024-11-07T14:55:03.791Z'
+  var d = new Date().toJSON();
+  return d.slice(0,4)+d.slice(5,7)+d.slice(8,10)+'_'+
+         d.slice(11,13)+d.slice(14,16)+d.slice(17,19);
+}
+
+function saveDeltaFile() {  
+  const da = wordList.createDeltaArrayForSave();
+  const gpose = {
+    delta: da,
+    font: {
+      fullName: hbs.getFontFullName(),
+      version:  hbs.getFontVersion(),
+      fileName: fontFile.filename,
+    },
+    fff: {
+      fileName: jsonFile.filename,
+    },
+    words: {
+      fileName: wordListFile.filename,
+      count: wordList.length(),
+    },
+  }
+  const json = JSON5.stringify(gpose, null, 1);
+  saveTextToFile(json, `gpos-editor.${DateTimeForFilename()}.gpose`);
+}
+
+async function loadDeltaFileProcess(txt, showAlert=true) {
+  const gpose = JSON5.parse(txt);
+  //res = wordList.applyDeltaArrayFromLoad(gpose.delta);
+  const max = gpose.delta.length;
+  progressPanel.start(max, 'Apply', true);
+  for (let i=0; i<max; i++) {
+    const de = gpose.delta[i];
+    wordList.applyDeltaArrayEntry(de);
+    if (progressPanel.setProgress(i)) await scheduler.yield();
+    if (progressPanel.aborted()) break;
+  }
+  progressPanel.done();
+  if (showAlert) {
+    window.alert(`Processed ${res.found}. ${res.unfound} new`);
+  }
+  wordList.buildDeltaChoices();
+  refreshSVG(null, null, true);
+  showTrafficLights();
+}
+
+async function loadDeltaFileLoad(file) {
+  if (!file) return;
+  const fileName = file.name.toLowerCase();
+  if (!fileName.endsWith('.gpose')) {
+    window.alert('Not a .GPOSE delta file');
+    return;
+  }
+  const txt = await file.text();
+  loadDeltaFileProcess(txt);
+}
+
+function loadDeltaFile() {
+  chooseFile(loadDeltaFileLoad);
+}
+
+function showStatistics() {
+  const stats = wordList.buildStatistics();
+  let html = '';
+  //html += `Index:${wordList.getCurrentIndex()}, Total:${stats.total}, Collisions:${stats.collision}, Near:${stats.near}, Kerning:${stats.kerning}, Maybe:${stats.maybe}, Pattern:${stats.pattern}, Edits:${stats.edited}`;
+  /*
+  html += `Index: ${wordList.getCurrentIndex()}`;
+  divStatistics.innerHTML = html;
+  */
+  if (!isNaN(inpIndex.value)) {
+    inpIndex.value = wordList.getCurrentIndex(true);
+    spanIndex.hidden = true;
+  } else {
+    spanIndex.innerText = wordList.getCurrentIndex(true);
+    spanIndex.hidden = false;
+  }
+
+  spanStatAll.innerText       = stats.total;
+  spanStatCollision.innerText = stats.collision;
+  spanStatNear.innerText      = stats.near;
+  spanStatKerning.innerText   = stats.kerning;
+  spanStatMaybe.innerText     = stats.maybe;
+  spanStatPattern.innerText   = stats.pattern;
+  spanStatEdited.innerText    = stats.edited;
+}
+
+function updateClassChoice() {
+  if (radClassAll.checked) {
+    whichNext = 'all';
+  } else
+  if (radClassCollision.checked) {
+    whichNext = FORCEFIELD_QUALITY.COLLISION_GLYPH;
+  } else
+  if (radClassNear.checked) {
+    whichNext = FORCEFIELD_QUALITY.COLLISION_NEAR;
+  } else
+  if (radClassKerning.checked) {
+    whichNext = FORCEFIELD_QUALITY.KERNING;
+  } else
+  if (radClassMaybe.checked) {
+    whichNext = FORCEFIELD_QUALITY.MAYBE;
+  } else
+  if (radClassPattern.checked) {
+    whichNext = 'pattern';
+  }
+  if (radClassEdited.checked) {
+    whichNext = 'edited';
+  }
+}
+
+function patternMatchShow() {
+  // Slip in the correct information into the dialog.
+  wordList.leavingCurrentEntry();
+  radPatternAll.checked = radClassAll.checked;
+  radPatternCollision.checked = radClassCollision.checked;
+  radPatternNear.checked = radClassNear.checked;
+  radPatternKerning.checked = radClassKerning.checked;
+  radPatternMaybe.checked = radClassMaybe.checked;
+  radPatternPattern.checked = radClassPattern.checked;
+  radPatternEdited.checked = radClassEdited.checked;
+
+  const pattern = current.entry.getGlyphPattern(wordList);
+  inpPattern.value = pattern;
+  let minGlyphs = [...pattern].reduce((count, char)=> char==='*'?count+1:count, 0)
+  if (minGlyphs < 2) minGlyphs = 2;
+  txtMinMatch.value = minGlyphs;
+  // Now show it...
+  divPatternOutput.innerHTML = '';
+  divPatternSvg.innerHTML = '';
+  spanPatternWord.innerText = current.entry.getWord();
+  spanPatternUnicode.innerText = divUnicode.innerText;
+  dlgPatternApply.showModal();
+}
+
+function splitInfoToGlyphs(txt) {
+  const ic = [];
+  ic.rtl = txt.startsWith('←');
+  if (ic.rtl) txt = txt.slice(1).trim();
+  if (txt) {
+    const arr = txt.split(' ');
+    for (let idx=0; idx<arr.length; idx++) {
+      const g = arr[idx];
+      if (!g) continue;
+      const m = g.match(/([\*\+]*)\s*([^\s]+)/u);
+      if (!m) continue;
+      const hasAsterisk = (m[1].includes('*'));
+      const hasInclude  = (m[1].includes('+'));
+      ic.push({
+        index: idx,
+        glyph: m[2],
+        apply: hasAsterisk,
+        must : hasInclude || hasAsterisk,
+      })
+    }
+  }
+  return ic;
+}
+
+function buildPatternSourceArray(txt) {
+  const sarr = splitInfoToGlyphs(txt);
+  for (let i=0; i<sarr.length; i++) {
+    const rule = sarr[i].glyph;
+    if (rule.startsWith('/') && rule.endsWith('/')) {
+      sarr[i].glyph = new RegExp(rule.slice(1, -1), 'u');
+    }
+  }
+  sarr.areEqual = function(a,b) {
+    const ga = a.glyph;
+    const gb = b.glyph;
+    if (typeof gb !== 'object')
+      return ga === gb;
+    return gb.test(ga);
+  }
+  return sarr;
+}
+
+function patternMatchExtract(sa, searchText, minLength, maxGap) {
+  const sarr = buildPatternSourceArray(searchText);
+  const options = {
+    equals: sarr.areEqual,
+    minLength: minLength,
+    maxGapA: maxGap,
+    maxGapB: maxGap,
+  }
+
+  const nMust = sarr.reduce((count, entry) => entry.must ? count+1 : count, 0);
+  const res = [];
+  for (let i=0; i<sa.length; i++) {
+    const idx = sa[i];
+    const we = wordList.get(idx);
+    const wehb = [];
+    we.hb.forEach((e, i)=>{
+      wehb.push({
+        glyph: wordList.hbs.getGlyphName(e.g),
+        index: i,
+      })
+    });
+    const r = lcsWithGapConstraints(wehb, sarr, options);
+    if (r.length >= minLength) {
+      // Now check whether we have all the required glyphs in the sequence
+      const nMustThis = r.reduce((count,entry)=> entry.b.must ? count+1 : count, 0);
+      if (nMustThis >= nMust) {
+        res.push({
+          index: idx,
+          result: r,
+        });
+      }
+    }
+  }
+  return res;
+}
+
+
+const patternApplication = {};
+
+let keyStates = {
+  notify: {},
+};
+
+function saveKeyState(event) {
+  keyStates.shiftKey = event.shiftKey;
+  keyStates.altKey   = event.altKey;
+  keyStates.ctrlKey  = event.ctrlKey;
+  keyStates.metaKey  = event.metaKey;
+  if (keyStates.notify) {
+    Object.keys(keyStates.notify).forEach( fn => fn(event) );
+  }
+}
+
+function addKeyStateCallback(fn) {
+  keyStates.notify[fn] = fn;
+}
+
+function removeKeyStateCallback(fn) {
+  keyStates.notify[fn] = null;
+}
+
+document.addEventListener('keydown', saveKeyState);
+document.addEventListener('keyup', saveKeyState);
+
+function patternShowSvg(indexResult) {
+  const options = {
+    glyphColor     : false,
+    showName       : false,
+    showGID        : false,
+    showNear       : false,
+    showNearBase   : false,
+    showFarBase    : false,
+    showFarMarks   : false,
+    showFarAll     : false,
+    showCollisions : true,
+    showGlue       : false,
+    showBase       : true,
+    showMark       : true,
+    showBaseLine   : true,
+    showEdits      : true,
+  };
+  const results = patternApplication.results;
+  // Apply the current delta information
+  if (indexResult >= results.length) {
+    divPatternSvg.innerHTML = '';
+    return;
+  }
+  const res = results[indexResult];
+  const we = wordList.get(res.index);
+  const daSaved = we.saveDelta();
+  if (!keyStates.shiftKey) {
+    we.clearEdits();
+    res.result.forEach(re=>{
+      if (re.b.apply) {
+        const gidx = re.b.index;
+        const tidx = re.a.index;
+        const des = patternApplication.entry.delta[gidx];
+        if (typeof des.dx == 'number') we.updateDelta(tidx, 'dx', des.dx);
+        if (typeof des.dy == 'number') we.updateDelta(tidx, 'dy', des.dy);
+        if (typeof des.ax == 'number') we.updateDelta(tidx, 'ax', des.ax);
+      }
+    });
+  }
+  const svgRes = we.toSVG(wordList, options);
+  we.restoreDelta(daSaved);
+  divPatternSvg.innerHTML = wrapSvg(svgRes.svg, {
+    heightOut: 180,
+    widthOut: 600,
+  });
+}
+
+function getFilteredList() {
+  const sa = {list:undefined, name:''};
+  if (radPatternAll.checked)        {
+    sa.list = wordList.filtered.all;
+    sa.name = 'all';
+  } else
+  if (radPatternCollision.checked)  {
+    sa.list = wordList.filtered.collision;
+    sa.name = 'collision';
+  } else
+  if (radPatternNear.checked)       {
+    sa.list = wordList.filtered.near;
+    sa.name = 'near';
+  } else
+  if (radPatternKerning.checked)    {
+    sa.list = wordList.filtered.kerning;
+    sa.name = 'kerning';
+  } else
+  if (radPatternMaybe.checked)      {
+    sa.list = wordList.filtered.maybe;
+    sa.name = 'maybe';
+  } else
+  if (radPatternPattern.checked)    {
+    sa.list = wordList.filtered.pattern;
+    sa.name = 'pattern';
+  } else
+  if (radPatternEdited.checked)     {
+    sa.list = wordList.filtered.edited;
+    sa.name = 'edited';
+  }
+  return sa;  
+}
+
+async function patternMatchFind() {
+  const searchText = inpPattern.value;
+
+  const minLength = parseInt(txtMinMatch.value);
+  const maxGap = parseInt(txtMaxGap.value);
+
+  const sa = getFilteredList().list;
+
+  const ma = patternMatchExtract(sa, searchText, minLength, maxGap);
+  let max = ma.length;
+  let html = '\t# Word \tInfo<br/>\r\n';
+  progressPanel.start(max, "Searching", true);
+  if (max > 500) max = 500;
+  await scheduler.yield();
+  for (let i=0; i<max; i++) {
+    const res = ma[i];
+    if (res.index == wordList.getCurrentIndex()) continue;
+    const we = wordList.get(res.index);
+    let glyphs = '';
+    let ia = 0;
+    for (let gidx=0; gidx<we.hb.length; gidx++) {
+      const hbe = we.hb[gidx];
+      let highlight = '';
+      if (ia < res.result.length) {
+        if (res.result[ia].a.index == gidx) {
+          highlight = (res.result[ia].b.apply) ? 'HiLiteChange' : 'HiLite';;
+          ia++;
+        }
+      }
+      const gname = wordList.hbs.getGlyphName(hbe.g);
+      if (highlight != '') {
+        glyphs +=  `<span class='${highlight}'>${gname}</span> `;
+      }
+      else
+        glyphs += `${gname} `;
+    }
+    html += `<span onmouseover='patternShowSvg(${i});' onmousemove='patternShowSvg(${i});'><span class='prIndex'>${res.index}</span> <span class='prWord'>${we.getWord()}</span></span> \t${glyphs}<br/>\r\n`;
+    if (progressPanel.setProgress(i)) await scheduler.yield();
+    if (progressPanel.aborted()) break;
+  }
+  progressPanel.done();
+  await scheduler.yield();
+  patternApplication.results = ma;
+  patternApplication.search  = searchText;
+  patternApplication.entry   = current.entry;
+
+  divPatternOutput.innerHTML = html;
+  divPatternResults.innerHTML = `Found ${ma.length}`;
+  if (max < ma.length) divPatternResults.innerHTML += ` <font color='red'>Only ${max} shown!</font>`;
+  patternShowSvg(0);
+}
+
+async function patternApply() {
+  const results = patternApplication.results;
+  const max = results.length;
+  const edited = [];
+  let changed = 0;
+  let better = 0;
+  let unchanged = 0;
+  progressPanel.start(max, 'Apply', true);
+  for (let i=0; i<max; i++) {
+    const res = results[i];
+    const we = wordList.get(res.index);
+    const daSaved = we.saveDelta();
+    const qBefore = we.getQuality();
+    res.result.forEach(re=> {
+      if (re.b.apply) {
+        const gidx = re.b.index; // Source
+        const tidx = re.a.index; // Target
+        const des = patternApplication.entry.delta[gidx];
+        if (typeof des.dx == 'number') we.updateDelta(tidx, 'dx', des.dx);
+        if (typeof des.dy == 'number') we.updateDelta(tidx, 'dy', des.dy);
+        if (typeof des.ax == 'number') we.updateDelta(tidx, 'ax', des.ax);
+      }
+    });
+    we.evaluate(wordList, evaluateOptions);
+    const qAfter = we.getQuality();
+    if (qAfter > qBefore) {
+      // WORSE!
+      we.restoreDelta(daSaved);
+      unchanged++;
+    } else {
+      if (qAfter < qBefore)
+        better++;
+      edited.push(res.index);
+      changed++;
+    }
+    if (progressPanel.setProgress(i)) await scheduler.yield();
+    if (progressPanel.aborted()) break;
+  }
+  progressPanel.done();
+  wordList.buildStatistics();
+  wordList.filtered.pattern = edited; //!!Nasty
+  radClassPattern.disabled = wordList.filtered.pattern.length == 0;
+  refreshSVG();
+  showTrafficLights();
+  dlgPatternApply.close();
+  showStatistics();
+  //dlgPatternApply.hidden = true;
+  //divMAIN.hidden = false;
+  window.alert(`Changed: ${changed}\r\nBetter: ${better}\r\nLeft: ${unchanged}`);
+}
+
+function gotoIndex() {
+  if (current.entry && current.entry.hasEdits()) {
+    wordList.buildStatistics();
+  }
+  const txt = inpIndex.value;
+  if (isNaN(txt)) {
+    // Perform a search...
+    for (let i=wordList.getCurrentIndex()+1; i<wordList.length(); i++) {
+      const we = wordList.get(i);
+      if (we.getWord().search(txt) >= 0) {
+        refreshSVG(null, i+1, true);
+        return;
+      }
+    }
+  } else {
+    const n = parseInt(txt);
+    refreshSVG(null, n, true);    
+  }
+}
+
+function doDownloadSvg() {
+  DownloadSvg(`gat.${current.entry.getWord()}`);
+}
+
+function deleteFontByName(name) {
+  document.fonts.forEach(
+    (v) => {
+      if (v.family == name) {
+        document.fonts.delete(v);
+      }
+    }
+  );
+}
+
+async function applyFont(fontname, data) {
+  const fontFace = new FontFace(fontname, data);
+  fontFace.load().then( () => {
+    deleteFontByName(fontname);
+    document.fonts.add(fontFace);
+  }, (err)=> {console.error(err); });
+}
+
+let wordListFile;
+let fontFile;
+let jsonFile;
+let gposeFile;
+
+function decideButtonProcessEnable() {
+  if (!wordListFile?.loaded) return;
+  if (!fontFile?.loaded) return;
+  if (!jsonFile?.loaded) return;
+  btnProcessWords.disabled = false;
+}
+
+async function handleDropTXT(fileObject) {
+  const file = fileObject.file;
+  const filename = fileObject.filename;
+  const wordListText = await file.text();
+  words = convertLinesToArray(wordListText);
+  ddWordListFileName.innerText = filename;
+  ddWordListFileResult.innerHTML = `${words.length} words`;
+  fileObject.loaded = (words.length > 0);
+  decideButtonProcessEnable();
+}
+
+async function handleDropTTF(fileObject) {
+  const file = fileObject.file;
+  const filename = fileObject.filename;
+  const buff = await file.arrayBuffer();
+  hbs.setFontBlob(buff);
+  ddFontFileName.innerText = filename;
+  ddFontFileResult.innerHTML = `${hbs.getFontFullName()}<br/>${hbs.getFontVersion()}`;
+  fileObject.loaded = hbs.getFontFullName();
+  decideButtonProcessEnable();
+}
+
+async function handleDropWordTTF(fileObject) {
+  const file = fileObject.file;
+  const filename = fileObject.filename;
+  const buff = await file.arrayBuffer();
+  applyFont('TEST_FONT', buff);  
+}
+
+async function handleWordDropFiles(file, event, files) {
+  for (let i=0; i<files.length; i++) {
+    file = files[i];
+    const filename = file.name.toLowerCase();
+    if (filename.endsWith('.ttf')) {
+      await handleDropWordTTF({file:file, filename:filename});
+    } else
+      window.alert(`File extension "${filename}" not relevant`);
+  }
+}
+
+async function handleDropJSON(fileObject) {
+  const file = fileObject.file;
+  const filename = fileObject.filename;
+  const jsonText = await file.text();
+  ddJSONFileName.innerText = filename;
+  try {
+    fff.applyJsonText(jsonText);
+  } 
+  catch(e) {
+    ddJSONFileResult.innerHTML = `<font color='red'>${e}</font>`;
+    return;
+  }
+  fileObject.loaded = (jsonText && (jsonText.length > 0));
+  ddJSONFileResult.innerHTML = `Loaded`;
+  decideButtonProcessEnable();
+}
+
+async function handleDropGpose(fileObject) {
+  const file = fileObject.file;
+  const filename = fileObject.filename;
+  const jsonText = await file.text();
+  ddGPOSEFileName.innerText = filename;
+  //loadDeltaFileLoad(file);
+  gposeFile.text = await file.text();
+  ddGPOSEFileResult.innerHTML = `Loaded`;
+}
+
+async function handleDropFiles(file, event, files) {
+
+  for (let i=0; i<files.length; i++) {
+    file = files[i];
+    const filename = file.name.toLowerCase();
+    if (filename.endsWith('.txt')) wordListFile = {file:file, filename:filename};
+    else
+    if (filename.endsWith('.ttf')) fontFile = {file:file, filename:filename};
+    else
+    if (filename.endsWith('.json')) jsonFile = {file:file, filename:filename};
+    else
+    if (filename.endsWith('.gpose')) gposeFile = {file:file, filename:filename};
+    else
+      window.alert(`File extension "${filename}" not known`);
+  }
+  // Order of processing is important - JSON **must** be after the TTF
+  if (wordListFile)  await handleDropTXT(wordListFile);
+  if (fontFile)      await handleDropTTF(fontFile);
+  if (jsonFile)      await handleDropJSON(jsonFile);
+  if (gposeFile)     await handleDropGpose(gposeFile);
+}
+
+async function processWordsInitial() {
+  btnProcessWords.disabled = true;
+  let max = words.length;
+  progressPanel.start(max, 'Adding');
+  await scheduler.yield();
+  for (let i=0; i<max; i++) {
+    wordList.addWord(words[i]);
+    if (progressPanel.setProgress(i)) await scheduler.yield();
+    if (progressPanel.aborted()) break;   
+  }
+  progressPanel.done();
+
+  max = wordList.length();
+  progressPanel.start(max, 'Shaping');
+  await scheduler.yield();
+  for (let i=0; i<max; i++) {
+    wordList.shape(i);
+    wordList.evaluate(i, evaluateOptions);
+    if (progressPanel.setProgress(i)) await scheduler.yield();    
+    if (progressPanel.aborted()) break;   
+  }
+  progressPanel.done();
+
+  if (gposeFile) {
+    loadDeltaFileProcess(gposeFile.text, false);
+    delete gposeFile.text;
+  }
+
+  divLOAD.hidden = true;
+  divMAIN.hidden = false;
+  refreshSVG(null, 0, true);
+}
+
+function doDownloadList() {
+  const sa = getFilteredList();
+  let txt = '';
+  txt += `  # List: ${sa.name}\r\n`;
+  for (let i=0; i<sa.list.length; i++) {
+    const index = sa.list[i];
+    const entry = wordList.getEntry(index);
+    txt += `${entry.getWord()}\t${entry.getQualityString()}\t"${entry.note}"\r\n`;
+  }
+  saveTextToFile(txt, `list.${sa.name}.${DateTimeForFilename()}.txt`);
+}
+
+function onBeforeChanged(e) {
+  updateShowBefore(cbBefore.checked);
+  //refreshSVG(null, null, true);
+  renderSVG(true);
+  showTrafficLights();
+}
+
+function toggleShowBefore(e) {
+  cbBefore.checked = !cbBefore.checked;
+  onBeforeChanged(e);
+}
+
+</script>
+
+<dialog id='dlgPatternApply'>
+  <button type='submit' aria-label='close' onclick='dlgPatternApply.close();'>X</button>
+  <h3>Bulk Apply: Pattern Search</h2>
+  <table border=0>
+    <tr>
+      <td width='10%' valign="top">Source List:</td>
+      <td colspan=2>
+        <input type='radio' id='radPatternAll'       name='radPattern' value='all' checked>All</input>
+        <input type='radio' id='radPatternCollision' name='radPattern' value='collision'>Collision</input>
+        <input type='radio' id='radPatternNear'      name='radPattern' value='near'>Near</input>
+        <input type='radio' id='radPatternKerning'   name='radPattern' value='kerning'>Kerning</input>
+        <input type='radio' id='radPatternMaybe'     name='radPattern' value='maybe'>Maybe</input>
+        <input type='radio' id='radPatternPattern'   name='radPattern' value='pattern'>Pattern</input>
+        <input type='radio' id='radPatternEdited'    name='radPattern' value='edited'>Edited</input>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top">Word:</td>
+      <td><span id="spanPatternWord">&nbsp;</span></td>
+      <td><span id="spanPatternUnicode">&nbsp;</span></td>
+    </tr>
+    <tr>
+      <td valign="top">Pattern:</td>
+      <td colspan=2>
+        <!--<input style='width:100%;' class='pattern_input' type='text' id='inpPattern'/>-->
+        <textarea id='inpPattern' class='pattern_input' style='width:100%;' rows='2'></textarea>
+      <br/>PREFIX: `<font color='red'>+</font>` must exist; `<font color='red'>*</font>` adjust glyph (implies `+`) - <em>no space before glyph name</em>!
+      <br/>HINT: Use `<font color='red'>/</font>...<font color='red'>/</font>` for regular expressions.
+      </td>
+    </tr>
+    <tr><td valign="top">Parameters:</td>
+      <td width='30%' valign='top'>
+        Min Count: <input style='width:10%;' type='text' id='txtMinMatch' value='2'></input> &nbsp;
+        Max Gap: <input style='width:10%;' type='text' id='txtMaxGap' value='1'></input> &nbsp;
+        <br/><button id='btnPatternMatch'>Find Matches</button>
+      </td>
+      <td width='60%'>
+        <div id='divPatternSvg'></div>
+      </td>
+    </tr>
+    <tr>
+      <td valign="top">Results:</td>
+      <td colspan=2>
+      <div id='divPatternResults'></div>
+      <div class='prContainer'>
+        <div class='prContent' id='divPatternOutput'> </div>
+        <!--<textarea rows=20 cols=60 id='taPatternOutput' wrap='off' style='font-family:monospace;' spellcheck='false'></textarea>-->
+      </div>
+      <span><em>Hover over index or word to show SVG. Hold SHIFT to show before.</em></span>
+    </tr>
+    <tr>
+      <td valign="top"></td>
+      <td>
+        <button id='btnPatternApply' style='background-color:#f83; color:white;'>Apply Changes</button>
+      </td>
+    </tr>
+  </table>
+</dialog>
+
+<div id='divLOAD'>
+  <h2>Load Files</h2>
+  <table border=1 width='75%' id='ddFiles'>
+    <tr>
+      <td width='15%'>1. Word List</td>
+      <td width='25%' id='ddWordListFile'>
+        Drag Word List .TXT file
+      </td>
+      <td width='30%'>
+        <span id='ddWordListFileName'></span>
+      </td>
+      <td width='30%'>
+        <span id='ddWordListFileResult'></span>
+      </td>
+    </tr>
+    <tr>
+      <td>2. Font</td>
+      <td id='ddFontFile'>
+        Drag Font .TTF file
+      </td>
+      <td><span id='ddFontFileName'></span></td>
+      <td><span id='ddFontFileResult'></span></td>
+    </tr>
+    <tr>
+      <td>3. Force Field JSON</td>
+      <td id='ddJSONFile'>
+        Drag .JSON file
+      </td>
+      <td><span id='ddJSONFileName'></span></td>
+      <td><span id='ddJSONFileResult'></span></td>
+    </tr>
+    <tr>
+      <td>4. GPOSE file (optional)</td>
+      <td id='ddJSONFile'>
+        Drag .GPOSE file
+      </td>
+      <td><span id='ddGPOSEFileName'></span></td>
+      <td><span id='ddGPOSEFileResult'></span></td>
+    </tr>
+    <tr>
+      <td>5. Process</td>
+      <td>
+        <button id='btnProcessWords' disabled>Process</button>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div id='divMAIN' hidden>
+<button style='background-color:#afa;' id='btnLoadDelta' onclick='loadDeltaFile();'>Load GPOSE Changes</button>
+<button style='background-color:#faa;' id='btnSaveDelta' onclick='saveDeltaFile();'>Save GPOSE Changes</button>
+
+<table border=0 width="100%">
+  <tr>
+    <td width='55%'>
+      <table border=0 width='100%'>
+      <tr>
+        <td width='14%' align='right'>Index:</td>
+        <td width='14%'><input type='text' id='inpIndex' value='0'></input> <span id='spanIndex'></span></td>
+        <td width='14%'><button id='btnGoIndex'>Go</button> </td>
+        <td width='14%' valign='top'><div id='divWord'>&nbsp;</div></td>
+        <!--
+        <td width='14%'> </td>
+        <td width='14%'> </td>
+        <td width='14%'> </td>
+        -->
+        <td width='42%' colspan=3 valign='top'><div id='divUnicode'>&nbsp;</div></td>
+      </tr>
+      <tr>
+        <td width='14%' align='center'><input type='radio' id='radClassAll'       name='radClass' value='all' checked>All</input></td>
+        <td width='14%' align='center'><input type='radio' id='radClassCollision' name='radClass' value='collision'>Collision</input></td>
+        <td width='14%' align='center'><input type='radio' id='radClassNear'      name='radClass' value='near'>Near</input></td>
+        <td width='14%' align='center'><input type='radio' id='radClassKerning'   name='radClass' value='kerning'>Kerning</input></td>
+        <td width='14%' align='center'><input type='radio' id='radClassMaybe'     name='radClass' value='maybe'>Maybe</input></td>
+        <td width='14%' align='center'><input type='radio' id='radClassPattern'   name='radClass' value='pattern' disabled>Pattern</input></td>
+        <td width='14%' align='center'><input type='radio' id='radClassEdited'    name='radClass' value='edited'>Edited</input></td>
+      </tr>
+      <tr>
+        <td align='center'><span id='spanStatAll'></span></td>
+        <td align='center'><span id='spanStatCollision'></span></td>
+        <td align='center'><span id='spanStatNear'></span></td>
+        <td align='center'><span id='spanStatKerning'></span></td>
+        <td align='center'><span id='spanStatMaybe'></span></td>
+        <td align='center'><span id='spanStatPattern'></span></td>
+        <td align='center'><span id='spanStatEdited'></span></td>
+      </tr>
+      <tr>
+        <td><button id='btnFirst' accesskey='1'>First (Alt-1)</button></td>
+        <td><button id='btnPrev'  accesskey='2'>Prev (Alt-2)</button></td>
+        <td><button id='btnNext'  accesskey='3'>Next (Alt-3)</button></td>
+        <td><button id='btnLast'  accesskey='4'>Last (Alt-4)</button></td>
+        <td>&nbsp;</td>
+        <td><button id='btnDownloadList'>Download</button></td>
+      </tr>
+    </table>
+    </td>
+    <td>
+<input type='range' value='0' min='0' max='750' id='rangeStretch'><br/>
+<table border=0 width='100%'>
+  <tr>
+    <td width='25%'><input type='checkbox' id='cbGid' checked><label for='cbGid'>GID</label></input></td>
+    <td width='25%'><input type='checkbox' id='cbName' checked><label for='cbName'>Name</label></input></td>
+    <td width='25%'><input type='checkbox' id='cbShowBaseLine' checked><label for='cbShowBaseLine'>Baseline</label></input></td>
+  </tr>
+  <tr>
+    <td width='25%'><input type='checkbox' id='cbColored' checked><label for='cbColored'>Colored</label></input></td>
+    <td width='25%'><input type='checkbox' id='cbShowBase' checked><label for='cbShowBase'>Base</label></input></td>
+    <td width='25%'><input type='checkbox' id='cbShowMark' checked><label for='cbShowMark'>Mark</label></input></td>
+  </tr>
+  <tr>
+    <td width='25%'><input type='checkbox' id='cbNear' checked><label for='cbNear'>Near</label></input></td>
+    <td width='25%'><input type='checkbox' id='cbNearBase' checked><label for='cbNearBase'>NearBase</label></input></td>
+  </tr>
+  <tr>
+    <td width='25%'><input type='checkbox' id='cbFarAll' checked><label for='cbFarAll'>FarAll</label></input></td>
+    <td width='25%'><input type='checkbox' id='cbFarBase'><label for='cbFarBase'>FarBase</label></input></td>
+    <td width='25%'><input type='checkbox' id='cbFarMarks'><label for='cbFarMarks'>FarMarks</label></input></td>
+  </tr>
+  <tr>
+    <td><input type='checkbox' id='cbCollisions' checked><label for='cbCollisions'>Collisions</label></input></td>
+    <td><input type='checkbox' id='cbGlue' checked><label for='cbGlue'>Glue</label></input></td>
+    <td><input type='checkbox' id='cbBefore'><label for='cbBefore'>B<u>e</u>fore</label></input></td>
+  </tr>
+</table>
+    </td>
+  </tr>
+</table>
+
+
+<table border=0 width='100%'>
+<tr>
+  <td width='10%'></td>
+  <td width='66%'></td>
+  <td width='24%'></td>
+</tr>
+<tr>
+<td align='center'>
+  <div id='divTrafficLight'>
+    <table border=1>
+      <tr><td id='tdTLCollision'>&nbsp;Collision&nbsp;</td></tr>
+      <tr><td id='tdTLNear'>&nbsp;Near&nbsp;</td></tr>
+      <tr><td id='tdTLKernBad'>&nbsp;Kerning&nbsp;</td></tr>
+      <tr><td id='tdTLKernMaybe'>&nbsp;Maybe&nbsp;</td></tr>
+      <tr><td id='tdTLGood'>&nbsp;Good&nbsp;</td></tr>
+    </table>
+  </div>
+</td>
+<td colspan=2>
+  <div id="svgResult"></div>
+  <p>
+    <button id="saveSvg" onclick="doDownloadSvg();">Download SVG</button>
+    <button id="zoomOutSVG" onclick="zoomSVG(-1);">-</button>
+    <button id="zoomResetSVG" onclick="zoomSVG(0);" title="Middle click or Shift-Left and drag to pan the SVG">100%</button>
+    <button id="zoomInSVG" onclick="zoomSVG(1);">+</button>
+    <font size=-1>&nbsp; Shift-Scroll to zoom. Left-Mouse to drag.</font>
+  </p>
+</td>
+</tr>
+<td align='right'>History</td>
+<td colspan=2>
+  <div id='divBreadCrumbs'></div>
+</td>
+</tr>
+<tr>
+<td align='center'><button id='btnReset' onclick='resetGlyphDelta();' style='background-color:#faa;'>Reset All</button></td>
+<td>
+  <div id="divNote" class='pattern_input'></div>
+</td>
+<td><button id='btnPatternDialog' style='background-color:#f83; color:white; width:100%'>Bulk Apply</button></td>
+</tr></table>
+<div id="divGlyphs"></div>
+
+</div> <!--MAIN-->
+
+<script>
+function patchEvent(func, event, arr) {
+  arr.forEach(e=>e.addEventListener(event, func));
+}
+function patchEventInput(func, arr) {
+  patchEvent(func, 'input', arr);
+}
+function patchEventClick(func, arr) {
+  patchEvent(func, 'click', arr);
+}
+
+function shortcutAddButton(ele, ks, fn) {
+  let html = ele.innerHTML;
+  shortcut.add(ks, fn);
+  const key = ks.substr(-1);  
+  const re = new RegExp(key, 'i');
+  ele.innerHTML = html.replace(re, '<u>$&</u>');
+}
+
+patchEventInput(updateRangeStretch, [rangeStretch]);
+patchEventInput(updateCheckBoxes,
+  [
+   cbGid, cbName,
+   cbNear, cbNearBase,
+   cbShowBaseLine,
+   cbFarBase, cbFarMarks, cbFarAll,
+   cbShowBase, cbShowMark, cbColored,
+   cbCollisions, cbGlue,
+  ]);
+
+patchEventInput(onBeforeChanged, [cbBefore]);
+shortcut.add('Alt+E', toggleShowBefore);
+
+patchEventClick(gotoFirst, [btnFirst]);
+patchEventClick(gotoPrev,  [btnPrev]);
+patchEventClick(gotoNext,  [btnNext]);
+patchEventClick(gotoLast,  [btnLast]);
+patchEventClick(patternMatchFind, [btnPatternMatch]);
+shortcutAddButton(btnPatternMatch, 'Alt+F', patternMatchFind);
+
+patchEventInput(updateClassChoice, [radClassAll, radClassCollision, radClassNear, radClassKerning, radClassMaybe, radClassPattern, radClassEdited]);
+
+patchEventClick(patternMatchShow, [btnPatternDialog]);
+shortcutAddButton(btnPatternDialog, 'Alt+B', patternMatchShow);
+patchEventClick(patternApply, [btnPatternApply]);
+shortcutAddButton(btnPatternApply, 'Alt+A', patternApply);
+patchEventClick(gotoIndex, [btnGoIndex]);
+
+patchDragDrop(ddFiles, handleDropFiles);
+const ddFilesDT = new DoubleTapDetector(ddFiles, () => {
+  chooseFile(handleDropFiles, {multiple:true});
+});
+
+patchDragDrop(divWord, handleWordDropFiles);
+const divWordDT = new DoubleTapDetector(divWord, () => {
+  chooseFile(handleWordDropFiles, {multiple:false});
+});
+
+patchEventClick(processWordsInitial, [btnProcessWords]);
+patchEventClick(doDownloadList, [btnDownloadList]);
+
+window.addEventListener('beforeunload', (e)=>{
+  const msg = 'Close this tool?\r\nIf you leave before saving, changes will be lost!';
+  if (e) { e.returnValue = msg; }
+  return msg;
+});
+
+
+</script>
+
+<br/>2026-03-12 10:50
+</body>
+
+
+</html>
