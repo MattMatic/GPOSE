@@ -130,6 +130,12 @@ class HarfBuzzShaping {
     this.script = null;
     this.language = null;
   }
+  setDirection(direction) {
+    this.direction = direction;
+  }
+  clearDirection() {
+    this.direction = null;
+  }
   setFeatures(features) {
     this.features = features;
   }
@@ -178,6 +184,9 @@ class HarfBuzzShaping {
     let buffer = this.hb.createBuffer();
     buffer.addText(txt);
     buffer.guessSegmentProperties();
+    if ((typeof this.direction === 'string') && (this.direction.length > 0)) {
+      buffer.setDirection(this.direction);
+    }
     if ((typeof this.script === 'string') && (this.script.length > 0)) {
       buffer.setScript(this.script);
     }

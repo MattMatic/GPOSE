@@ -106,6 +106,8 @@ dialog {
 <script type="text/javascript" src="./js/doubletap.js"></script>
 <script type="text/javascript" src="./js/dragdrop.js"></script>
 <script type="text/javascript" src="./js/shortcut.js"></script>
+<script type="text/javascript" src="./js/jszip.min.js"></script>
+<script type="text/javascript" src="./js/FileSaver.min.js"></script>
 
 <script type="module" async defer>
 'use strict';
@@ -624,6 +626,14 @@ function renderSVG(full) {
   divUnicode.innerText = stringToHex(word);
   divNote.innerText = current.note;
 
+  const dir = entry.getDirection();
+  if (dir === 'ltr')
+    radDirLTR.checked = true;
+  else if (dir === 'rtl')
+    radDirRTL.checked = true;
+  else
+    radDirAuto.checked = true;
+
   if (full) {
     showStatistics();
     showTrafficLights();    
@@ -674,6 +684,27 @@ function updateCheckBoxes(e) {
   refreshSVG();
 }
 
+function updateRadioButtons(e) {
+  const entry = wordList.getCurrentEntry();
+  let dir;
+  if (radDirLTR.checked) dir = 'ltr'; else
+  if (radDirRTL.checked) dir = 'rtl';
+
+  if (entry.getDirection() === dir) return;
+  if (entry.hasDelta()) {
+    if (!window.confirm('Changing direction will clear the changes!\r\nContinue?')) {
+      dir = entry.getDirection();
+      if (dir === 'ltr') radDirLTR.checked = true;
+      else if (dir === 'rtl') radDirRTL.checked = true;
+      else radDirAuto.checked = true;
+      return;
+    }
+  }
+  entry.setDirection(dir);
+  entry.shapeAndEvaluate(wordList); //????
+  refreshSVG(null, entry, true);
+}
+
 let whichNext = 'all';
 
 function gotoWhich(forwards, firstLast) {
@@ -706,7 +737,7 @@ function DateTimeForFilename() {
          d.slice(11,13)+d.slice(14,16)+d.slice(17,19);
 }
 
-function saveDeltaFile() {  
+function createDeltaJson() {
   const da = wordList.createDeltaArrayForSave();
   const gpose = {
     delta: da,
@@ -723,8 +754,107 @@ function saveDeltaFile() {
       count: wordList.length(),
     },
   }
-  const json = JSON5.stringify(gpose, null, 1);
+  return JSON5.stringify(gpose, null, 1);
+}
+
+function saveDeltaFile() {  
+  const json = createDeltaJson();
   saveTextToFile(json, `gpos-editor.${DateTimeForFilename()}.gpose`);
+}
+
+async function saveHarfBuzzData(options={}) {
+  const {
+    saveTxt=false, 
+    saveJson=true, 
+    saveJson5=false,
+  } = options;
+  const zip = new JSZip();
+  const RTL = String.fromCodePoint(0x2190);
+  let txt = '';
+  txt += `\t# FONTFILE: ${fontFile.filename}\n`;
+  txt += `\t# FONTNAME: ${hbs.getFontFullName()}\n`;
+  txt += `\t# FONTVERS: ${hbs.getFontVersion()}\n`;
+  txt += `\t# WORDFILE: ${wordListFile.filename}\n`;
+  txt += `\t# WORDS:    ${wordList.length()}\n`;
+  zip.file('info.txt', txt);
+
+  function entryToHbTxt(entry) {
+    let txt = '';
+    const hb = entry.hb;
+    if (hb.rtl) txt += RTL;
+    for (let gi=0; gi<hb.length; gi++) {
+      const ge = hb[gi];
+      txt += `${ge.g},${ge.dx},${ge.dy},${ge.ax},${ge.ay},${ge.cl};`;
+    }
+    return txt;
+  }
+
+  const max = wordList.length();
+
+  if (saveTxt) {
+    progressPanel.start(max, 'HarfBuzz Text');
+    for (let i=0; i<max; i++) {
+      const entry = wordList.getEntry(i);
+      txt += `${entry.w}\t`;
+      txt += entryToHbTxt(entry);
+      txt += `\n`;
+      if (progressPanel.setProgress(i)) await scheduler.yield();
+    }
+    //saveTextToFile(txt, `gpos-editor.${DateTimeForFilename()}.gpose.harfbuzz`);
+    zip.file('data/harfbuzz.txt', txt);
+    progressPanel.done();
+    await scheduler.yield();
+  }
+
+  if (saveJson || saveJson5) {
+    let hbJson = {};
+    hbJson.font = {
+      file: fontFile.filename,
+      name: hbs.getFontFullName(),
+      version: hbs.getFontVersion(),
+    };
+    hbJson.words = {
+      file: wordListFile.filename,
+      count: wordList.length(),
+    };
+    hbJson.data = [];
+    progressPanel.start(max, 'HarfBuzz JSON');
+    for (let i=0; i<max; i++) {
+      const entry = wordList.getEntry(i);
+      hbJson.data[i] = {
+        w: entry.w,
+        d: entryToHbTxt(entry),
+        dir: entry.getDirection(),
+      }
+      if (progressPanel.setProgress(i)) await scheduler.yield();
+    }
+    if (saveJson5) {
+      zip.file('data/harfbuzz.5.json', JSON5.stringify(hbJson, null, 1));
+    }
+    if (saveJson) {
+      zip.file('data/harfbuzz.json', JSON.stringify(hbJson, null, 1)); // Faster to ingest later
+    }
+    progressPanel.done();
+    await scheduler.yield();    
+  }
+
+  // Add the delta file
+  progressPanel.start(3, 'ZIP');
+  zip.file('data/delta.json', createDeltaJson());
+  progressPanel.setProgress(1);
+  await scheduler.yield();
+
+  const zipBlob = await zip.generateAsync({
+            type: 'blob', 
+            compression: 'DEFLATE',
+            compressionOptions: {
+              level: 5,
+            }
+          });
+  progressPanel.setProgress(2);
+  await scheduler.yield();
+  saveAs(zipBlob, `gpos-editor.${DateTimeForFilename()}.gpose.zip`);
+  progressPanel.done();
 }
 
 async function loadDeltaFileProcess(txt, showAlert=true) {
@@ -1435,6 +1565,7 @@ function toggleShowBefore(e) {
 
 <div id='divMAIN' hidden>
 <button style='background-color:#afa;' id='btnLoadDelta' onclick='loadDeltaFile();'>Load GPOSE Changes</button>
+<button style='background-color:#fac;' id='btnSaveHB' onclick='saveHarfBuzzData({saveTxt:false, saveJson:true, saveJson5:false,});'>Save ZIP</button>
 <button style='background-color:#faa;' id='btnSaveDelta' onclick='saveDeltaFile();'>Save GPOSE Changes</button>
 
 <table border=0 width="100%">
@@ -1554,7 +1685,16 @@ function toggleShowBefore(e) {
   <div id="divNote" class='pattern_input'></div>
 </td>
 <td><button id='btnPatternDialog' style='background-color:#f83; color:white; width:100%'>Bulk Apply</button></td>
-</tr></table>
+</tr>
+<tr>
+  <td align='center'>Direction</td>
+  <td>
+    <input type='radio' id='radDirAuto' name='direction' value='Auto'><label for='radDirAuto' checked>Auto</label>
+    <input type='radio' id='radDirLTR' name='direction' value='LTR'><label for='radDirLTR'>LTR</label>
+    <input type='radio' id='radDirRTL' name='direction' value='RTL'><label for='radDirRTL'>RTL</label>
+  </td>
+</tr>
+</table>
 <div id="divGlyphs"></div>
 
 </div> <!--MAIN-->
@@ -1588,6 +1728,12 @@ patchEventInput(updateCheckBoxes,
    cbShowBase, cbShowMark, cbColored,
    cbCollisions, cbGlue,
   ]);
+patchEventInput(updateRadioButtons,
+  [
+    radDirAuto,
+    radDirLTR,
+    radDirRTL,
+  ])
 
 patchEventInput(onBeforeChanged, [cbBefore]);
 shortcut.add('Alt+E', toggleShowBefore);
@@ -1629,7 +1775,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-03-12 10:50
+<br/>2026-04-28 12:00
 </body>
 
 

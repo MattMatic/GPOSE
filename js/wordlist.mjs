@@ -19,10 +19,27 @@ class WordListEntry {
       traceAttachments: true,
       traceStack: false,
     }
+    wordlist.hbs.setDirection(this.direction);
     this.hb = wordlist.hbs.trace(this.w, options);
     this.ev = null;
     this.clearDelta();
+    wordlist.hbs.clearDirection();
     return this;
+  }
+  clearDirection() {
+    delete this.direction;
+  }
+  setDirection(direction) {
+    if (typeof direction !== 'string') {
+      this.clearDirection();
+    } else {
+      this.direction = direction;
+    }
+  }
+  getDirection() {
+    if ((typeof this.direction === 'string') && (this.direction.length > 0))
+      return this.direction;
+    return undefined;
   }
   evaluate(wordlist, options={}) {
     if (!this.hb) return this;
@@ -53,7 +70,7 @@ class WordListEntry {
     }
     return note.trim();
   }
-  shapeAndEvalute(wordlist, options={}) {
+  shapeAndEvaluate(wordlist, options={}) {
     this.shape(wordlist);
     this.evaluate(wordlist, options);
   }
@@ -299,6 +316,7 @@ class WordList {
           da.push({
             w: we.w,
             d: delta,
+            dir: we.getDirection(),
           });
         }
       }
@@ -313,6 +331,7 @@ class WordList {
       let wse = this.findWord(de.w);
       if (!wse && addNewWords) {
         const we = new WordListEntry(de.w);
+        we.setDirection(de.dir);
         we.shape(this);
         we.evaluate(this, options);
         this.list.push(we);
@@ -320,6 +339,11 @@ class WordList {
         this._unfound++;
       } else {
         this._found++;
+        if (de.dir && (de.dir !== wse.getDirection())) {
+          wse.setDirection(de.dir);
+          wse.shape(this);
+          wse.evaluate(this, options);
+        }
       }
       // Now apply the delta...
       if (wse) {
