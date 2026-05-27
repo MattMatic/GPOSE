@@ -401,12 +401,14 @@ class HarfBuzzShaping {
     if (data) return data;
     const path = this.font.glyphToPath(gid);
     const json = this.font.glyphToJson(gid);
+    const otGlyph = this.otFont?.glyphs?.get(gid);
     const newData = {
       class: this.otLayout.getGlyphClass(this.otFont?.tables?.gdef?.classDef, gid),
-      name: this.otFont?.glyphs?.get(gid)?.name,
+      name: otGlyph?.name,
       path: path, 
       json: this._glyphToRelativeJson(json),
       jsonAbsolute : json,
+      unicodes: otGlyph?.unicodes,
     };
     this.cacheGlyphData.set(gid, newData);
     return newData;
@@ -421,6 +423,10 @@ class HarfBuzzShaping {
   getGlyphName(gid) {
     const data = this._getGlyphData(gid);
     return data.name;
+  }
+  getGlyphUnicodes(gid) {
+    const data = this._getGlyphData(gid);
+    return data.unicodes;
   }
   getGlyphCount() {
     //return this.otFont?.glyphs?.length;

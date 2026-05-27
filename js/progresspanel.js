@@ -45,7 +45,7 @@ class ProgressPanel {
     let html = `${i} / ${max}\r\n${secondsToHHSSMM(overallTime)} / ${secondsToHHSSMM(eta)} ${rate}/s`;
     progress_panel_eta.innerText = html;
   }
-  start(max, message, allowAbort) {
+  async start(max, message, allowAbort) {
     this._abort = false;
     this._running = true;
     this._started = Date.now();
@@ -57,7 +57,7 @@ class ProgressPanel {
     if (allowAbort) progress_panel_abort.hidden = false;
     progress_panel.style.display = 'block';
     this._timeout = setTimeout(() => { clearTimeout(this._timeout); }, 25);
-    //await scheduler.yield(); -- call this on return
+    await scheduler.yield(); // call this on return
     return true;
   }
   abort() {
@@ -67,26 +67,27 @@ class ProgressPanel {
   aborted() {
     return this._abort;
   }
-  done() {
+  async done() {
     this._update();
     if (this._func) this._func(this, this._i, this._max);
     progress_panel_abort.hidden = true;
     progress_panel.style.display = 'none';
     this._running = false;
+    await scheduler.yield();
     return true;
   }
   running() {
     return this._running;
   }
-  setProgress(i) {
+  async setProgress(i) {
     this._i = i;    
     return this.update();
   }
-  update() {
+  async update() {
     if (this._elapsed()) {
       this._update();
       if (this._func) this._func(this, this._i, this._max);
-      //await scheduler.yield(); -- call this in the top level function
+      await scheduler.yield(); // call this in the top level function
       return true;
     }
   }

@@ -319,31 +319,27 @@ async function shapeWords(count) {
   if (!count || (count > max))
     count = max;
 
-  progressPanel.start(count, 'Adding');
-  await scheduler.yield();
+  await progressPanel.start(count, 'Adding');
   myYield();
   const ts = performance.now();
   for (let i=0; i<count; i++) {
     wordList.addWord(words[i]);
-    if (progressPanel.setProgress(i)) await scheduler.yield();
+    await progressPanel.setProgress(i);
     myYield();
   }
-  progressPanel.done();
-  await scheduler.yield();
+  await progressPanel.done();
 
   max = wordList.length();
   if (count > max) count = max;
-  progressPanel.start(count, 'Shaping');
-  await scheduler.yield();
+  await progressPanel.start(count, 'Shaping');
   myYield();
   for (let i=0; i<count; i++) {
     if (!(i%1000)) console.log(`...${Math.round(i/count*100)}%`);
     wordList.shape(i);
-    if (progressPanel.setProgress(i)) await scheduler.yield();
+    await progressPanel.setProgress(i);
     myYield();
   }
-  progressPanel.done();
-  await scheduler.yield();
+  await progressPanel.done();
   const te = performance.now();
   console.log('Time', te-ts);
 }
@@ -353,17 +349,15 @@ async function evaluateWords(count) {
   const ts = performance.now();
   if (!count || (count > max))
     count = max;
-  progressPanel.start(count, 'Evaluating');
-  await scheduler.yield();
+  await progressPanel.start(count, 'Evaluating');
   myYield();
   for (let i=0; i<count; i++) {
     if (!(i%1000)) console.log(`...${Math.round(i/count*100)}%`);
     wordList.evaluate(i, evaluateOptions);
-    if (progressPanel.setProgress(i)) await scheduler.yield();
+    await progressPanel.setProgress(i);
     myYield();
   }
-  progressPanel.done();
-  await scheduler.yield();
+  await progressPanel.done();
   const te = performance.now();
   console.log('Time', te-ts);
 }
@@ -737,7 +731,7 @@ function DateTimeForFilename() {
          d.slice(11,13)+d.slice(14,16)+d.slice(17,19);
 }
 
-function createDeltaJson() {
+function createDeltaJson(use5 = true) {
   const da = wordList.createDeltaArrayForSave();
   const gpose = {
     delta: da,
@@ -754,7 +748,10 @@ function createDeltaJson() {
       count: wordList.length(),
     },
   }
-  return JSON5.stringify(gpose, null, 1);
+  if (use5)
+    return JSON5.stringify(gpose, null, 1);
+  else
+    return JSON.stringify(gpose, null, 1);
 }
 
 function saveDeltaFile() {  
@@ -762,11 +759,37 @@ function saveDeltaFile() {
   saveTextToFile(json, `gpos-editor.${DateTimeForFilename()}.gpose`);
 }
 
+async function createFontInfoObject() {
+  const fontInfo = {
+    glyphs: [],
+    classNames: ['base', 'ligature', 'mark', 'component'], // 1,2,3,4
+  };
+  const max = hbs.getGlyphCount();
+  for (let gi=0; gi<max; gi++) {
+    const gName = hbs.getGlyphName(gi);
+    const gClass = hbs.getGlyphClass(gi);
+    const gUnicodes = hbs.getGlyphUnicodes(gi);
+    const field = hbg.getField(gi).getField();
+    const bbox = field.bbox;
+    const bb = bbox.x.min || bbox.x.max || bbox.y.min || bbox.y.max ? [bbox.x.min, bbox.y.min, bbox.x.max, bbox.y.max] : undefined;
+    const gie = {
+      g: gi,
+      n: gName,
+      c: gClass,
+      u: gUnicodes.length>0 ? gUnicodes : undefined,
+      bb: bb,
+    }
+    fontInfo.glyphs.push(gie);
+  }
+  return fontInfo;
+}
+
 async function saveHarfBuzzData(options={}) {
   const {
     saveTxt=false, 
     saveJson=true, 
     saveJson5=false,
+    saveFontInfo=true,
   } = options;
   const zip = new JSZip();
   const RTL = String.fromCodePoint(0x2190);
@@ -792,18 +815,17 @@ async function saveHarfBuzzData(options={}) {
   const max = wordList.length();
 
   if (saveTxt) {
-    progressPanel.start(max, 'HarfBuzz Text');
+    await progressPanel.start(max, 'HarfBuzz Text');
     for (let i=0; i<max; i++) {
       const entry = wordList.getEntry(i);
       txt += `${entry.w}\t`;
       txt += entryToHbTxt(entry);
       txt += `\n`;
-      if (progressPanel.setProgress(i)) await scheduler.yield();
+      await progressPanel.setProgress(i);
     }
     //saveTextToFile(txt, `gpos-editor.${DateTimeForFilename()}.gpose.harfbuzz`);
     zip.file('data/harfbuzz.txt', txt);
-    progressPanel.done();
-    await scheduler.yield();
+    await progressPanel.done();
   }
 
   if (saveJson || saveJson5) {
@@ -812,13 +834,15 @@ async function saveHarfBuzzData(options={}) {
       file: fontFile.filename,
       name: hbs.getFontFullName(),
       version: hbs.getFontVersion(),
+      script: hbs.script,
+      language: hbs.language,
     };
     hbJson.words = {
       file: wordListFile.filename,
       count: wordList.length(),
     };
     hbJson.data = [];
-    progressPanel.start(max, 'HarfBuzz JSON');
+    await progressPanel.start(max, 'HarfBuzz JSON');
     for (let i=0; i<max; i++) {
       const entry = wordList.getEntry(i);
       hbJson.data[i] = {
@@ -826,7 +850,7 @@ async function saveHarfBuzzData(options={}) {
         d: entryToHbTxt(entry),
         dir: entry.getDirection(),
       }
-      if (progressPanel.setProgress(i)) await scheduler.yield();
+      await progressPanel.setProgress(i);
     }
     if (saveJson5) {
       zip.file('data/harfbuzz.5.json', JSON5.stringify(hbJson, null, 1));
@@ -834,15 +858,18 @@ async function saveHarfBuzzData(options={}) {
     if (saveJson) {
       zip.file('data/harfbuzz.json', JSON.stringify(hbJson, null, 1)); // Faster to ingest later
     }
-    progressPanel.done();
-    await scheduler.yield();    
+    await progressPanel.done();
+  }
+
+  if (saveFontInfo) {
+    const fio = await createFontInfoObject();
+    zip.file('data/fontinfo.json', JSON.stringify(fio, null, 1));
   }
 
   // Add the delta file
-  progressPanel.start(3, 'ZIP');
-  zip.file('data/delta.json', createDeltaJson());
-  progressPanel.setProgress(1);
-  await scheduler.yield();
+  await progressPanel.start(3, 'ZIP');
+  zip.file('data/delta.json', createDeltaJson(false));
+  await progressPanel.setProgress(1);
 
   const zipBlob = await zip.generateAsync({
             type: 'blob', 
@@ -851,24 +878,23 @@ async function saveHarfBuzzData(options={}) {
               level: 5,
             }
           });
-  progressPanel.setProgress(2);
-  await scheduler.yield();
+  await progressPanel.setProgress(2);
   saveAs(zipBlob, `gpos-editor.${DateTimeForFilename()}.gpose.zip`);
-  progressPanel.done();
+  await progressPanel.done();
 }
 
 async function loadDeltaFileProcess(txt, showAlert=true) {
   const gpose = JSON5.parse(txt);
   //res = wordList.applyDeltaArrayFromLoad(gpose.delta);
   const max = gpose.delta.length;
-  progressPanel.start(max, 'Apply', true);
+  await progressPanel.start(max, 'Apply', true);
   for (let i=0; i<max; i++) {
     const de = gpose.delta[i];
     wordList.applyDeltaArrayEntry(de);
-    if (progressPanel.setProgress(i)) await scheduler.yield();
+    await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;
   }
-  progressPanel.done();
+  await progressPanel.done();
   if (showAlert) {
     window.alert(`Processed ${res.found}. ${res.unfound} new`);
   }
@@ -1162,7 +1188,7 @@ async function patternMatchFind() {
   const ma = patternMatchExtract(sa, searchText, minLength, maxGap);
   let max = ma.length;
   let html = '\t# Word \tInfo<br/>\r\n';
-  progressPanel.start(max, "Searching", true);
+  await progressPanel.start(max, "Searching", true);
   if (max > 500) max = 500;
   await scheduler.yield();
   for (let i=0; i<max; i++) {
@@ -1187,12 +1213,12 @@ async function patternMatchFind() {
       else
         glyphs += `${gname} `;
     }
-    html += `<span onmouseover='patternShowSvg(${i});' onmousemove='patternShowSvg(${i});'><span class='prIndex'>${res.index}</span> <span class='prWord'>${we.getWord()}</span></span> \t${glyphs}<br/>\r\n`;
-    if (progressPanel.setProgress(i)) await scheduler.yield();
+    const indexHighlight = we.hasDelta() ? ' HiLite' : '';
+    html += `<span onmouseover='patternShowSvg(${i});' onmousemove='patternShowSvg(${i});'><span class='prIndex${indexHighlight}'>${res.index}</span> <span class='prWord'>${we.getWord()}</span></span> \t${glyphs}<br/>\r\n`;
+    await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;
   }
-  progressPanel.done();
-  await scheduler.yield();
+  await progressPanel.done();
   patternApplication.results = ma;
   patternApplication.search  = searchText;
   patternApplication.entry   = current.entry;
@@ -1210,7 +1236,7 @@ async function patternApply() {
   let changed = 0;
   let better = 0;
   let unchanged = 0;
-  progressPanel.start(max, 'Apply', true);
+  await progressPanel.start(max, 'Apply', true);
   for (let i=0; i<max; i++) {
     const res = results[i];
     const we = wordList.get(res.index);
@@ -1238,10 +1264,10 @@ async function patternApply() {
       edited.push(res.index);
       changed++;
     }
-    if (progressPanel.setProgress(i)) await scheduler.yield();
+    await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;
   }
-  progressPanel.done();
+  await progressPanel.done();
   wordList.buildStatistics();
   wordList.filtered.pattern = edited; //!!Nasty
   radClassPattern.disabled = wordList.filtered.pattern.length == 0;
@@ -1400,25 +1426,23 @@ async function handleDropFiles(file, event, files) {
 async function processWordsInitial() {
   btnProcessWords.disabled = true;
   let max = words.length;
-  progressPanel.start(max, 'Adding');
-  await scheduler.yield();
+  await progressPanel.start(max, 'Adding');
   for (let i=0; i<max; i++) {
     wordList.addWord(words[i]);
-    if (progressPanel.setProgress(i)) await scheduler.yield();
+    await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;   
   }
-  progressPanel.done();
+  await progressPanel.done();
 
   max = wordList.length();
-  progressPanel.start(max, 'Shaping');
-  await scheduler.yield();
+  await progressPanel.start(max, 'Shaping');
   for (let i=0; i<max; i++) {
     wordList.shape(i);
     wordList.evaluate(i, evaluateOptions);
-    if (progressPanel.setProgress(i)) await scheduler.yield();    
+    await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;   
   }
-  progressPanel.done();
+  await progressPanel.done();
 
   if (gposeFile) {
     loadDeltaFileProcess(gposeFile.text, false);
@@ -1565,7 +1589,7 @@ function toggleShowBefore(e) {
 
 <div id='divMAIN' hidden>
 <button style='background-color:#afa;' id='btnLoadDelta' onclick='loadDeltaFile();'>Load GPOSE Changes</button>
-<button style='background-color:#fac;' id='btnSaveHB' onclick='saveHarfBuzzData({saveTxt:false, saveJson:true, saveJson5:false,});'>Save ZIP</button>
+<button style='background-color:#fac;' id='btnSaveHB' onclick='saveHarfBuzzData({saveTxt:false, saveJson:true, saveJson5:false,saveFontInfo:true,});'>Save ZIP</button>
 <button style='background-color:#faa;' id='btnSaveDelta' onclick='saveDeltaFile();'>Save GPOSE Changes</button>
 
 <table border=0 width="100%">
@@ -1775,7 +1799,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-04-28 12:00
+<br/>2026-05-26 13:25
 </body>
 
 
