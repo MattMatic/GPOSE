@@ -103,6 +103,11 @@ class WordListEntry {
   hasDelta() {
     return this.delta && (this.delta.length > 0) && (this.delta.find(e=>(!isNaN(e.dx) || !isNaN(e.dy) || !isNaN(e.ax))));
   }
+  hasDeltaAt(gidx) {
+    if (!this.delta || (gidx >= this.delta.length)) return false;
+    const e = this.delta[gidx];
+    return (!isNaN(e.dx) || !isNaN(e.dy) || !isNaN(e.ax) || !isNaN(e.ay));
+  }
   getQuality() {
     return this?.ev?.quality;
   }

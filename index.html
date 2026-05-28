@@ -4,7 +4,7 @@
 
 <style>
 body {
-  font-family: "Calibri";
+  font-family: system-ui, sans-serif;
   background-color: #f0f0e0;
   overflow-y: scroll;
   margin-right: 20%;
@@ -59,7 +59,7 @@ dialog {
   white-space: nowrap;
   overflow-y: scroll;
   overflow-x: scroll;
-  font-family: monospace;
+  font-family: ui-monospace, monospace;
 }
 .prIndex {
   display: inline-block;
@@ -78,6 +78,17 @@ dialog {
 .pattern_input {
   font-family: "Consolas";
   font-size: 110%;
+}
+.mono {
+  font-family: ui-monospace, monospace;
+}
+.mono_red {
+  font-family: ui-monospace, monospace;
+  color: red;
+}
+.hasdelta {
+  color:#e08;
+  font-weight: bold;
 }
 #rangeStretch {
   width: 100%;
@@ -980,6 +991,7 @@ function patternMatchShow() {
 
   const pattern = current.entry.getGlyphPattern(wordList);
   inpPattern.value = pattern;
+  inpPatternChanged();
   let minGlyphs = [...pattern].reduce((count, char)=> char==='*'?count+1:count, 0)
   if (minGlyphs < 2) minGlyphs = 2;
   txtMinMatch.value = minGlyphs;
@@ -991,22 +1003,89 @@ function patternMatchShow() {
   dlgPatternApply.showModal();
 }
 
+function parseGlyphDelta(text) {
+  // label: any chars except whitespace, <, >, *, +
+  // optional <...> block
+  //const m = text.match(/^([^\s<>*+]+)(?:<([^>]*)>)?$/);
+  const m = text.match(/^([^\s<>]+)(?:<([^>]*)>)?$/);
+  if (!m) return null;
+
+  const glyph = m[1];
+  const obj = {};
+  let nobj = 0;
+
+  if (m[2]) {
+    // Split on commas OR whitespace, in any amount
+    const tokens = m[2].split(/[,\s]+/).filter(Boolean);
+
+    tokens.forEach(pair => {
+      const kv = pair.match(/^([^:]+):(.+)$/);
+      if (kv) {
+        obj[kv[1]] = isNaN(kv[2]) ? kv[2] : Number(kv[2]);
+        nobj++;
+      }
+    });
+  }
+
+  return { glyph, deltas: nobj>0?obj:undefined };
+}
+
+function splitOutsideAngles(str) {
+  const out = [];
+  let buf = "";
+  let depth = 0; // 0 = outside <>, 1 = inside <>
+
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i];
+
+    if (c === "<") {
+      depth++;
+      buf += c;
+      continue;
+    }
+
+    if (c === ">") {
+      depth = Math.max(0, depth - 1);
+      buf += c;
+      continue;
+    }
+
+    // Space OUTSIDE <...> means token boundary
+    if (c === " " && depth === 0) {
+      if (buf.length) {
+        out.push(buf);
+        buf = "";
+      }
+      continue;
+    }
+
+    buf += c;
+  }
+
+  if (buf.length) out.push(buf);
+
+  return out;
+}
+
 function splitInfoToGlyphs(txt) {
   const ic = [];
   ic.rtl = txt.startsWith('←');
   if (ic.rtl) txt = txt.slice(1).trim();
   if (txt) {
-    const arr = txt.split(' ');
+    //const arr = txt.split(' ').filter(s=>s.trim() !== '');
+    const arr = splitOutsideAngles(txt);
     for (let idx=0; idx<arr.length; idx++) {
       const g = arr[idx];
       if (!g) continue;
-      const m = g.match(/([\*\+]*)\s*([^\s]+)/u);
+      const m = g.match(/([\*\+]*)\s*(.+)/u);
+      const gd = parseGlyphDelta(m[2]);
       if (!m) continue;
       const hasAsterisk = (m[1].includes('*'));
       const hasInclude  = (m[1].includes('+'));
       ic.push({
         index: idx,
-        glyph: m[2],
+        glyph: gd.glyph,
+        delta: gd.deltas,
         apply: hasAsterisk,
         must : hasInclude || hasAsterisk,
       })
@@ -1015,25 +1094,48 @@ function splitInfoToGlyphs(txt) {
   return ic;
 }
 
-function buildPatternSourceArray(txt) {
-  const sarr = splitInfoToGlyphs(txt);
-  for (let i=0; i<sarr.length; i++) {
-    const rule = sarr[i].glyph;
-    if (rule.startsWith('/') && rule.endsWith('/')) {
-      sarr[i].glyph = new RegExp(rule.slice(1, -1), 'u');
-    }
+function compareDeltaValue(a, b) {
+  if (typeof a === 'undefined') return true;
+  if (a === '*') {
+    // Anything set
+    if (typeof b === 'undefined') return false; // NOT set
+    return true;
   }
-  sarr.areEqual = function(a,b) {
-    const ga = a.glyph;
-    const gb = b.glyph;
-    if (typeof gb !== 'object')
-      return ga === gb;
-    return gb.test(ga);
+  if (a === 0) {
+    if (typeof b === 'undefined') return true; // Allow zero as no delta
   }
-  return sarr;
+  return (a === b);
 }
 
-function patternMatchExtract(sa, searchText, minLength, maxGap) {
+async function patternMatchExtract(sa, searchText, minLength, maxGap) {
+  let we; // WordEntry
+  function buildPatternSourceArray(txt) {
+    const sarr = splitInfoToGlyphs(txt);
+    for (let i=0; i<sarr.length; i++) {
+      const rule = sarr[i].glyph;
+      if (rule.startsWith('/') && rule.endsWith('/')) {
+        sarr[i].glyph = new RegExp(rule.slice(1, -1), 'u');
+      }
+    }
+    sarr.areEqual = function(a,b) {
+      const ga = a.glyph;
+      const gb = b.glyph;
+      if (typeof gb !== 'object') {
+        if (ga !== gb) return false;
+      } else {
+        if (!gb.test(ga)) return false;
+      }
+      // Check for deltas...
+      if (!b.delta) return true;
+      const hbd = we.delta[a.index];
+      if (!compareDeltaValue(b.delta.dx, hbd.dx)) return false;
+      if (!compareDeltaValue(b.delta.dy, hbd.dy)) return false;
+      if (!compareDeltaValue(b.delta.ax, hbd.ax)) return false;
+      if (!compareDeltaValue(b.delta.ay, hbd.ay)) return false;
+      return true;
+    }
+    return sarr;
+  }
   const sarr = buildPatternSourceArray(searchText);
   const options = {
     equals: sarr.areEqual,
@@ -1044,9 +1146,11 @@ function patternMatchExtract(sa, searchText, minLength, maxGap) {
 
   const nMust = sarr.reduce((count, entry) => entry.must ? count+1 : count, 0);
   const res = [];
+  await progressPanel.start(sa.length, 'Search');
   for (let i=0; i<sa.length; i++) {
+    await progressPanel.setProgress(i);
     const idx = sa[i];
-    const we = wordList.get(idx);
+    we = wordList.get(idx);
     const wehb = [];
     we.hb.forEach((e, i)=>{
       wehb.push({
@@ -1066,6 +1170,7 @@ function patternMatchExtract(sa, searchText, minLength, maxGap) {
       }
     }
   }
+  await progressPanel.done();
   return res;
 }
 
@@ -1185,7 +1290,7 @@ async function patternMatchFind() {
 
   const sa = getFilteredList().list;
 
-  const ma = patternMatchExtract(sa, searchText, minLength, maxGap);
+  const ma = await patternMatchExtract(sa, searchText, minLength, maxGap);
   let max = ma.length;
   let html = '\t# Word \tInfo<br/>\r\n';
   await progressPanel.start(max, "Searching", true);
@@ -1206,7 +1311,8 @@ async function patternMatchFind() {
           ia++;
         }
       }
-      const gname = wordList.hbs.getGlyphName(hbe.g);
+      let gname = wordList.hbs.getGlyphName(hbe.g);
+      if (we.hasDeltaAt(gidx)) gname = `<span class='hasdelta'>${gname}</span>`;
       if (highlight != '') {
         glyphs +=  `<span class='${highlight}'>${gname}</span> `;
       }
@@ -1214,7 +1320,7 @@ async function patternMatchFind() {
         glyphs += `${gname} `;
     }
     const indexHighlight = we.hasDelta() ? ' HiLite' : '';
-    html += `<span onmouseover='patternShowSvg(${i});' onmousemove='patternShowSvg(${i});'><span class='prIndex${indexHighlight}'>${res.index}</span> <span class='prWord'>${we.getWord()}</span></span> \t${glyphs}<br/>\r\n`;
+    html += `<span onmouseover='patternShowSvg(${i});' onmousemove='patternShowSvg(${i});'><span class='prIndex${indexHighlight}'>${res.index+1}</span> <span class='prWord'>${we.getWord()}</span></span> \t${glyphs}<br/>\r\n`;
     await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;
   }
@@ -1229,7 +1335,17 @@ async function patternMatchFind() {
   patternShowSvg(0);
 }
 
-async function patternApply() {
+function inpPatternChanged(e) {
+  const pattern = inpPattern.value;
+  const re = new RegExp(/\*\s*[\p{L}.]/u);
+  if (re.test(pattern)) {
+    btnPatternApply.innerHTML = '<u>A</u>pply Changes';
+  } else {
+    btnPatternApply.innerHTML = 'S<u>a</u>ve to Pattern List';
+  }
+}
+
+async function patternApply(event) {
   const results = patternApplication.results;
   const max = results.length;
   const edited = [];
@@ -1269,7 +1385,15 @@ async function patternApply() {
   }
   await progressPanel.done();
   wordList.buildStatistics();
-  wordList.filtered.pattern = edited; //!!Nasty
+  if (event.ctrlKey) {
+    // Comine them
+    const set = new Set(wordList.filtered.pattern);
+    for (const v of edited) set.add(v);
+    const arr = Array.from(set).sort();
+    wordList.filtered.pattern = arr;
+  } else {
+    wordList.filtered.pattern = edited; //!!Nasty
+  }
   radClassPattern.disabled = wordList.filtered.pattern.length == 0;
   refreshSVG();
   showTrafficLights();
@@ -1506,8 +1630,9 @@ function toggleShowBefore(e) {
       <td colspan=2>
         <!--<input style='width:100%;' class='pattern_input' type='text' id='inpPattern'/>-->
         <textarea id='inpPattern' class='pattern_input' style='width:100%;' rows='2'></textarea>
-      <br/>PREFIX: `<font color='red'>+</font>` must exist; `<font color='red'>*</font>` adjust glyph (implies `+`) - <em>no space before glyph name</em>!
-      <br/>HINT: Use `<font color='red'>/</font>...<font color='red'>/</font>` for regular expressions.
+      <br/>PREFIX: `<span class="mono"><font color='red'>+</font></span>` must exist; `<span class="mono"><font color='red'>*</font></span>` adjust glyph (implies `+`) - <em>no space before glyph name</em>!
+      <br/>DELTA: Use form `<span class="mono">GLYPH<font color='red'>&lt;ID:VAL,ID:VAL&gt;</font></span>` - where ID=dx,dy,ax,ay - to find delta values. e.g. `<span class="mono">ALIFf1&lt;dx:-60 ax:100>&gt;</span>`
+      <br/>HINT: Use `<span class="mono"><font color='red'>/</font>...<font color='red'>/</font></span>` for regular expressions.
       </td>
     </tr>
     <tr><td valign="top">Parameters:</td>
@@ -1533,7 +1658,7 @@ function toggleShowBefore(e) {
     <tr>
       <td valign="top"></td>
       <td>
-        <button id='btnPatternApply' style='background-color:#f83; color:white;'>Apply Changes</button>
+        <button id='btnPatternApply' title='Hold Ctrl key to merge into pattern list' style='background-color:#f83; color:white;'>Apply Changes</button>
       </td>
     </tr>
   </table>
@@ -1774,6 +1899,7 @@ patchEventInput(updateClassChoice, [radClassAll, radClassCollision, radClassNear
 patchEventClick(patternMatchShow, [btnPatternDialog]);
 shortcutAddButton(btnPatternDialog, 'Alt+B', patternMatchShow);
 patchEventClick(patternApply, [btnPatternApply]);
+patchEventInput(inpPatternChanged, [inpPattern]);
 shortcutAddButton(btnPatternApply, 'Alt+A', patternApply);
 patchEventClick(gotoIndex, [btnGoIndex]);
 
@@ -1790,6 +1916,7 @@ const divWordDT = new DoubleTapDetector(divWord, () => {
 patchEventClick(processWordsInitial, [btnProcessWords]);
 patchEventClick(doDownloadList, [btnDownloadList]);
 
+
 window.addEventListener('beforeunload', (e)=>{
   const msg = 'Close this tool?\r\nIf you leave before saving, changes will be lost!';
   if (e) { e.returnValue = msg; }
@@ -1799,7 +1926,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-05-26 13:25
+<br/>2026-05-28 11:05
 </body>
 
 
