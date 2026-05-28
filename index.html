@@ -101,7 +101,31 @@ dialog {
   font-family: "Consolas";
   font-size: 70%;
 }
+.tooltip-container {
+  position: relative;
+  display: inline-block;
+}
 
+.tooltip-container .tooltip {
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.2s;
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: #afa;
+  color: black;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.tooltip-container:hover .tooltip {
+  visibility: visible;
+  opacity: 1;
+}
 
 </style>
 </head>
@@ -1096,10 +1120,18 @@ function splitInfoToGlyphs(txt) {
 
 function compareDeltaValue(a, b) {
   if (typeof a === 'undefined') return true;
-  if (a === '*') {
-    // Anything set
+  if (typeof a === 'string') {
     if (typeof b === 'undefined') return false; // NOT set
-    return true;
+    if (a === '*') {
+      // Anything set
+      return true;
+    }
+    if (a === '-') {
+      if (b < 0) return true;
+    }
+    if (a === '+') {
+      if (b > 0) return true;
+    }
   }
   if (a === 0) {
     if (typeof b === 'undefined') return true; // Allow zero as no delta
@@ -1145,6 +1177,7 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
   }
 
   const nMust = sarr.reduce((count, entry) => entry.must ? count+1 : count, 0);
+  if (nMust < minLength) minLength = nMust;
   const res = [];
   await progressPanel.start(sa.length, 'Search');
   for (let i=0; i<sa.length; i++) {
@@ -1630,9 +1663,24 @@ function toggleShowBefore(e) {
       <td colspan=2>
         <!--<input style='width:100%;' class='pattern_input' type='text' id='inpPattern'/>-->
         <textarea id='inpPattern' class='pattern_input' style='width:100%;' rows='2'></textarea>
-      <br/>PREFIX: `<span class="mono"><font color='red'>+</font></span>` must exist; `<span class="mono"><font color='red'>*</font></span>` adjust glyph (implies `+`) - <em>no space before glyph name</em>!
-      <br/>DELTA: Use form `<span class="mono">GLYPH<font color='red'>&lt;ID:VAL,ID:VAL&gt;</font></span>` - where ID=dx,dy,ax,ay - to find delta values. e.g. `<span class="mono">ALIFf1&lt;dx:-60 ax:100>&gt;</span>`
-      <br/>HINT: Use `<span class="mono"><font color='red'>/</font>...<font color='red'>/</font></span>` for regular expressions.
+        <div class='tooltip-container'>
+          (Mouse over for hints)
+          <div class='tooltip'>
+            <h3>Prefix</h3>
+            `<span class="mono"><font color='red'>+</font></span>` must exist; `<span class="mono"><font color='red'>*</font></span>` adjust glyph (implies `+`) - <em>no space before glyph name</em>!
+
+            <h3>Delta</h3>
+            Use form `<span class="mono">GLYPH<font color='red'>&lt;ID:VAL,ID:VAL&gt;</font></span>`
+            <br/> - where ID=dx,dy,ax,ay - to find delta values.
+            <br/> - where VAL is a value or `*` = anything, `+` = any positive, `-` = any negative. 
+            <br/>e.g. `<span class="mono">ALIFf1&lt;dx:-60 ax:100&gt;</span>`
+            <br/>e.g. `<span class="mono">sda&lt;dx:* dy:-&gt;</span>`
+            
+            <h3>RegExp</h3>            
+            Use `<span class="mono"><font color='red'>/</font>...<font color='red'>/</font></span>` for regular expressions.
+            <br/>e.g. `<span class='mono'><font color='red'>/.+/</font></span>` to find any glyph.
+          </div>
+        </div>
       </td>
     </tr>
     <tr><td valign="top">Parameters:</td>
@@ -1926,7 +1974,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-05-28 11:05
+<br/>2026-05-28 13:25
 </body>
 
 
