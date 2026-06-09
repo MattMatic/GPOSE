@@ -1472,6 +1472,8 @@ function inpIndexChanged(e) {
   let txt = inpIndex.value;
   if (isNaN(txt)) {
     divUnicodeInput.innerText = stringToHex(txt);
+  } else {
+    divUnicodeInput.innerText = '';
   }
 }
 
@@ -1997,7 +1999,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-06-09 16:45
+<br/>2026-06-09 17:00
 </body>
 
 
