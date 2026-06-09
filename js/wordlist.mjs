@@ -6,6 +6,25 @@ import { HarfBuzzShaping, jsonToSvg } from './hbshaping.mjs';
 import { FontForceField, FORCEFIELD_QUALITY } from './fontforcefield.mjs';
 import { lcsWithGapConstraints } from './lcsgap.mjs';
 
+// Unicode Default_Ignorable codepoints that HarfBuzz skips in GPOS matching.
+// Source: Unicode DerivedCoreProperties.txt, filtered to characters that
+// HarfBuzz actually skips during GSUB/GPOS lookup matching.
+const DEFAULT_IGNORABLE_CODEPOINTS = new Set([
+  0x200C, // ZERO WIDTH NON-JOINER
+  0x200D, // ZERO WIDTH JOINER
+  0x034F, // COMBINING GRAPHEME JOINER
+  0x00AD, // SOFT HYPHEN
+  0x200B, // ZERO WIDTH SPACE
+  0x200E, // LEFT-TO-RIGHT MARK
+  0x200F, // RIGHT-TO-LEFT MARK
+  0xFEFF, // ZERO WIDTH NO-BREAK SPACE (BOM)
+  0x2060, // WORD JOINER
+  0x2061, // FUNCTION APPLICATION
+  0x2062, // INVISIBLE TIMES
+  0x2063, // INVISIBLE SEPARATOR
+  0x2064, // INVISIBLE PLUS
+]);
+
 class WordListEntry {
   constructor(word) {
     this.w = word;
@@ -13,17 +32,41 @@ class WordListEntry {
     //this.ev = [];
     //this.delta = [];
   }
-  shape(wordlist) {
+  shape(wordlist, gposGids) {
+    let needTrace = false;
+    for (const ch of this.w) {
+      if (DEFAULT_IGNORABLE_CODEPOINTS.has(ch.codePointAt(0))) needTrace = true;
+    }
+    if (!needTrace) gposGids = false; // No need to do this trace!
     const options = {
-      traceKeep: false,
+      traceKeep: gposGids,
       traceAttachments: true,
       traceStack: false,
     }
     wordlist.hbs.setDirection(this.direction);
-    this.hb = wordlist.hbs.trace(this.w, options);
+    this.hb = wordlist.hbs.trace(this.w, options);    
     this.ev = null;
     this.clearDelta();
     wordlist.hbs.clearDirection();
+    if (gposGids) {
+      const gposStart = this.hb.gpos_point;
+      if (typeof gposStart === 'number') {
+        const ge = this.hb.trace[gposStart].t;
+        const geLen = ge.length;
+        if (this.hb.rtl) {
+          for (let i=0; i<geLen; i++) {
+            this.hb[geLen-i-1].g = ge[i].g;
+          }          
+        } else {
+          for (let i=0; i<geLen; i++) {
+            this.hb[i].g = ge[i].g;
+          }          
+        }
+      }
+      delete this.hb.trace;
+      delete this.hb.gpos_point;
+      delete this.hb.gsub_point;    
+    }
     return this;
   }
   clearDirection() {
@@ -203,8 +246,8 @@ class WordList {
   get(index) {
     return this.list[index];
   }
-  shape(index) {
-    return this.list[index].shape(this);
+  shape(index, gposGids) {
+    return this.list[index].shape(this, gposGids);
   }
   evaluate(index, options={}) {
     return this.list[index].evaluate(this, options);

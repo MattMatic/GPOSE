@@ -97,9 +97,12 @@ dialog {
   font-size: 200%;
   font-family: "TEST_FONT";
 }
-#divUnicode, #spanPatternUnicode {
+#divUnicode, #divUnicodeInput, #spanPatternUnicode {
   font-family: "Consolas";
   font-size: 70%;
+}
+#inpIndex {
+  width: 75%;
 }
 .tooltip-container {
   position: relative;
@@ -370,7 +373,7 @@ async function shapeWords(count) {
   myYield();
   for (let i=0; i<count; i++) {
     if (!(i%1000)) console.log(`...${Math.round(i/count*100)}%`);
-    wordList.shape(i);
+    wordList.shape(i, true);
     await progressPanel.setProgress(i);
     myYield();
   }
@@ -885,6 +888,13 @@ async function saveHarfBuzzData(options={}) {
         d: entryToHbTxt(entry),
         dir: entry.getDirection(),
       }
+      const hb = entry.hb;
+      let marks = [];
+      if (hb?.attachments?.marks) marks = hb.attachments.marks.reverseIndexesToArray(hb.length);
+      if (marks.length > 0) hbJson.data[i].am = marks.join(' ');
+      let cursives = [];
+      if (hb?.attachments?.cursives) cursives = hb.attachments.cursives.reverseIndexesToArray(hb.length);
+      if (cursives.length > 0) hbJson.data[i].ac = cursives.join(' ');
       await progressPanel.setProgress(i);
     }
     if (saveJson5) {
@@ -1441,9 +1451,10 @@ function gotoIndex() {
   if (current.entry && current.entry.hasEdits()) {
     wordList.buildStatistics();
   }
-  const txt = inpIndex.value;
+  let txt = inpIndex.value;
   if (isNaN(txt)) {
     // Perform a search...
+    txt = txt.trim();
     for (let i=wordList.getCurrentIndex()+1; i<wordList.length(); i++) {
       const we = wordList.get(i);
       if (we.getWord().search(txt) >= 0) {
@@ -1454,6 +1465,13 @@ function gotoIndex() {
   } else {
     const n = parseInt(txt);
     refreshSVG(null, n, true);    
+  }
+}
+
+function inpIndexChanged(e) {
+  let txt = inpIndex.value;
+  if (isNaN(txt)) {
+    divUnicodeInput.innerText = stringToHex(txt);
   }
 }
 
@@ -1594,7 +1612,7 @@ async function processWordsInitial() {
   max = wordList.length();
   await progressPanel.start(max, 'Shaping');
   for (let i=0; i<max; i++) {
-    wordList.shape(i);
+    wordList.shape(i, true);
     wordList.evaluate(i, evaluateOptions);
     await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;   
@@ -1768,18 +1786,22 @@ function toggleShowBefore(e) {
 <table border=0 width="100%">
   <tr>
     <td width='55%'>
-      <table border=0 width='100%'>
+      <table border=1 width='100%'>
       <tr>
         <td width='14%' align='right'>Index:</td>
-        <td width='14%'><input type='text' id='inpIndex' value='0'></input> <span id='spanIndex'></span></td>
+        <td width='28%' colspan=2><input type='text' id='inpIndex' value='0'></input> <span id='spanIndex'></span></td>
         <td width='14%'><button id='btnGoIndex'>Go</button> </td>
-        <td width='14%' valign='top'><div id='divWord'>&nbsp;</div></td>
+        <td width='42%' colspan=3 valign='top'><div id='divWord'>&nbsp;</div></td>
         <!--
         <td width='14%'> </td>
         <td width='14%'> </td>
-        <td width='14%'> </td>
         -->
-        <td width='42%' colspan=3 valign='top'><div id='divUnicode'>&nbsp;</div></td>
+        <!--<td width='42%' colspan=3 valign='top'><div id='divUnicode'>&nbsp;</div></td>-->
+      </tr>
+      <tr>
+        <td></td>
+        <td colspan=3 valign='top'><span id='divUnicodeInput'></span></td>
+        <td colspan=3 valign='top'><div id='divUnicode'>&nbsp;</div></td>
       </tr>
       <tr>
         <td width='14%' align='center'><input type='radio' id='radClassAll'       name='radClass' value='all' checked>All</input></td>
@@ -1964,6 +1986,7 @@ const divWordDT = new DoubleTapDetector(divWord, () => {
 patchEventClick(processWordsInitial, [btnProcessWords]);
 patchEventClick(doDownloadList, [btnDownloadList]);
 
+patchEventInput(inpIndexChanged, [inpIndex]);
 
 window.addEventListener('beforeunload', (e)=>{
   const msg = 'Close this tool?\r\nIf you leave before saving, changes will be lost!';
@@ -1974,7 +1997,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-05-28 13:25
+<br/>2026-06-09 16:45
 </body>
 
 

@@ -64,6 +64,18 @@ class CursivesSets {
       e[1] = glyphCount - e[1] - 1;
     }
   }
+  reverseIndexesToArray(glyphCount) {
+    const max = this.cursives.length;
+    const arr = [];
+    for (let i=0; i<this.entries.length; i++) {
+      const e = this.entries[i];
+      arr.push([
+        glyphCount - e[0] - 1,
+        glyphCount - e[1] - 1
+      ]);
+    }
+    return arr;
+  }
 }
 
 /*
@@ -92,6 +104,16 @@ class MarksSets {
       e[0] = glyphCount - e[0] - 1;
       e[1] = glyphCount - e[1] - 1;
     });
+  }
+  reverseIndexesToArray(glyphCount) {
+    const arr = [];
+    this.marks.forEach(e=> {
+      arr.push([
+        glyphCount - e[0] - 1,
+        glyphCount - e[1] - 1,
+      ])
+    });
+    return arr;
   }
 }
 
