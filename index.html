@@ -845,7 +845,7 @@ async function saveHarfBuzzData(options={}) {
     if (hb.rtl) txt += RTL;
     for (let gi=0; gi<hb.length; gi++) {
       const ge = hb[gi];
-      txt += `${ge.g},${ge.dx},${ge.dy},${ge.ax},${ge.ay},${ge.cl};`;
+      txt += `${ge.gP},${ge.dx},${ge.dy},${ge.ax},${ge.ay},${ge.cl},${ge.g};`;
     }
     return txt;
   }
@@ -1999,7 +1999,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-06-09 17:00
+<br/>2026-06-10 17:20
 </body>
 
 

@@ -55,11 +55,11 @@ class WordListEntry {
         const geLen = ge.length;
         if (this.hb.rtl) {
           for (let i=0; i<geLen; i++) {
-            this.hb[geLen-i-1].g = ge[i].g;
+            this.hb[geLen-i-1].gP = ge[i].g;  // GPOS glyph ID (which could be different from .g)
           }          
         } else {
           for (let i=0; i<geLen; i++) {
-            this.hb[i].g = ge[i].g;
+            this.hb[i].gP = ge[i].g;
           }          
         }
       }
