@@ -845,7 +845,9 @@ async function saveHarfBuzzData(options={}) {
     if (hb.rtl) txt += RTL;
     for (let gi=0; gi<hb.length; gi++) {
       const ge = hb[gi];
-      txt += `${ge.gP},${ge.dx},${ge.dy},${ge.ax},${ge.ay},${ge.cl},${ge.g};`;
+      let gid = ge.gP;
+      if (typeof gid !== 'number') gid = ge.g;
+      txt += `${gid},${ge.dx},${ge.dy},${ge.ax},${ge.ay},${ge.cl},${ge.g};`;
     }
     return txt;
   }
@@ -1643,6 +1645,58 @@ function doDownloadList() {
   saveTextToFile(txt, `list.${sa.name}.${DateTimeForFilename()}.txt`);
 }
 
+// Paste from clipboard to the pattern list
+// Text might be one-word-per-line, or separated by ` | ` (from the GPOS Pattern Miner Designer Report)
+// Hold Ctrl-key down while clicking to append, rather than replace
+async function doPasteList(event) {
+  let txt;
+  try {
+    txt = await navigator.clipboard.readText();
+    if (!txt) return;
+  } catch (err) {
+    console.log('PASTE ERROR', err);
+    return;
+  }
+  let lines = txt.split(/\r?\n+/g);
+  if (lines.length === 1) {
+    // Split by the GPOS Pattern Miner Designer Report field
+    lines = txt.split(/ \| /g);
+  }
+  const list = [];
+
+  const count = lines.length;
+  await progressPanel.start(count, 'Pasting');
+  for (let i=0; i<count; i++) {
+    await progressPanel.setProgress(i);
+    const w = lines[i];
+    if (!w || (w==='')) continue;
+    const idx = wordList.find(w);
+    if (idx >= 0) {
+      list.push(idx);
+    } else {
+      // Add the new word ?
+      wordList.addWord(w);
+      const idx = wordList.find(w);
+      if (idx >= 0) {
+        wordList.list[idx].shapeAndEvaluate(wordList);
+        list.push(idx);
+      }
+    }
+  }
+  await progressPanel.done();
+
+  if (!event.ctrlKey) wordList.filtered.pattern = [];
+  const set = new Set(wordList.filtered.pattern);
+  for (const v of list) set.add(v);
+  const arr = Array.from(set).sort();
+  wordList.filtered.pattern = arr;
+  radClassPattern.disabled = wordList.filtered.pattern.length == 0;
+
+  refreshSVG();
+  showTrafficLights();
+  showStatistics();
+}
+
 function onBeforeChanged(e) {
   updateShowBefore(cbBefore.checked);
   //refreshSVG(null, null, true);
@@ -1823,13 +1877,16 @@ function toggleShowBefore(e) {
         <td align='center'><span id='spanStatPattern'></span></td>
         <td align='center'><span id='spanStatEdited'></span></td>
       </tr>
-      <tr>
+      <tr valign='top'>
         <td><button id='btnFirst' accesskey='1'>First (Alt-1)</button></td>
         <td><button id='btnPrev'  accesskey='2'>Prev (Alt-2)</button></td>
         <td><button id='btnNext'  accesskey='3'>Next (Alt-3)</button></td>
         <td><button id='btnLast'  accesskey='4'>Last (Alt-4)</button></td>
         <td>&nbsp;</td>
-        <td><button id='btnDownloadList'>Download</button></td>
+        <td align='center'>
+          <button id='btnDownloadList'>Download</button>
+          <br/><button id='btnPasteList' title='Hold Ctrl key to merge into pattern list' >Paste</button>
+        </td>
       </tr>
     </table>
     </td>
@@ -1987,6 +2044,7 @@ const divWordDT = new DoubleTapDetector(divWord, () => {
 
 patchEventClick(processWordsInitial, [btnProcessWords]);
 patchEventClick(doDownloadList, [btnDownloadList]);
+patchEventClick(doPasteList, [btnPasteList]);
 
 patchEventInput(inpIndexChanged, [inpIndex]);
 
@@ -1999,7 +2057,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-06-10 17:20
+<br/>2026-06-11 1005
 </body>
 
 

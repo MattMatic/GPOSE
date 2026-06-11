@@ -246,6 +246,9 @@ class WordList {
   get(index) {
     return this.list[index];
   }
+  find(word) {
+    return this.list.findIndex(e => e.w == word);
+  }
   shape(index, gposGids) {
     return this.list[index].shape(this, gposGids);
   }
