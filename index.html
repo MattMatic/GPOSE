@@ -741,7 +741,10 @@ let whichNext = 'all';
 
 function gotoWhich(forwards, firstLast) {
   if (wordList.gotoNext(whichNext, forwards, firstLast)) {
-    refreshSVG(null, wordList.getCurrentIndex(true), true);
+    const index = wordList.getCurrentIndex(true);
+    const ls = window.localStorage;
+    refreshSVG(null, index, true);
+    ls.setItem('index', index);
   }
 }
 
@@ -1460,6 +1463,8 @@ function gotoIndex() {
     for (let i=wordList.getCurrentIndex()+1; i<wordList.length(); i++) {
       const we = wordList.get(i);
       if (we.getWord().search(txt) >= 0) {
+        const ls = window.localStorage;
+        ls.setItem('index', i+1);
         refreshSVG(null, i+1, true);
         return;
       }
@@ -1630,7 +1635,10 @@ async function processWordsInitial() {
 
   divLOAD.hidden = true;
   divMAIN.hidden = false;
-  refreshSVG(null, 0, true);
+  const ls = window.localStorage;
+  const index = ls.getItem('index') ?? 0;
+  wordList.gotoIndex(index, true);
+  refreshSVG(null, index ?? 0, true);
 }
 
 function doDownloadList() {
@@ -1668,8 +1676,11 @@ async function doPasteList(event) {
   await progressPanel.start(count, 'Pasting');
   for (let i=0; i<count; i++) {
     await progressPanel.setProgress(i);
-    const w = lines[i];
-    if (!w || (w==='')) continue;
+    const line = lines[i];
+    const m = line.match(/^([^\s]?[^#\s]+)/u);  // Extract a word at the beginning - up to a space or hash
+    if (!m || (typeof m[1] !== 'string')) continue;
+    const w = m[1].trim();
+    if (w==='') continue;
     const idx = wordList.find(w);
     if (idx >= 0) {
       list.push(idx);
@@ -2057,7 +2068,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-06-11 1005
+<br/>2026-06-11 1330
 </body>
 
 
