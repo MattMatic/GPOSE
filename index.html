@@ -15,8 +15,14 @@ input[type="range"] {
   width: 35%;
 }
 table,th,td {
+  border: gray;
   border-collapse: collapse;
   padding: 2px;
+}
+#divGlyphs,
+#divGlyphs th,
+#divGlyphs td {
+  border: 1px solid #ccc;
 }
 input[type="text"] {
   width: 80px;
@@ -1853,7 +1859,7 @@ function toggleShowBefore(e) {
 <table border=0 width="100%">
   <tr>
     <td width='55%'>
-      <table border=1 width='100%'>
+      <table border=0 width='100%'>
       <tr>
         <td width='14%' align='right'>Index:</td>
         <td width='28%' colspan=2><input type='text' id='inpIndex' value='0'></input> <span id='spanIndex'></span></td>
@@ -2068,7 +2074,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-06-11 1330
+<br/>2026-06-16 1005
 </body>
 
 
