@@ -1458,6 +1458,19 @@ async function patternApply(event) {
   window.alert(`Changed: ${changed}\r\nBetter: ${better}\r\nLeft: ${unchanged}`);
 }
 
+async function patternCopy(event) {
+  const results = patternApplication.results;
+  const max = results.length;
+  let txt = '';
+  for (let i=0; i<max; i++) {
+    const res = results[i];
+    const we = wordList.get(res.index);
+    txt += `${we.getWord()}\r\n`;
+  }
+  await navigator.clipboard.writeText(txt);
+  window.alert(`Copied ${max} words`);
+}
+
 function gotoIndex() {
   if (current.entry && current.entry.hasEdits()) {
     wordList.buildStatistics();
@@ -1799,6 +1812,9 @@ function toggleShowBefore(e) {
       <td>
         <button id='btnPatternApply' title='Hold Ctrl key to merge into pattern list' style='background-color:#f83; color:white;'>Apply Changes</button>
       </td>
+      <td>
+        <button id='btnPatternCopy'>Copy List</button>
+      </td>
     </tr>
   </table>
 </dialog>
@@ -2045,6 +2061,7 @@ patchEventInput(updateClassChoice, [radClassAll, radClassCollision, radClassNear
 patchEventClick(patternMatchShow, [btnPatternDialog]);
 shortcutAddButton(btnPatternDialog, 'Alt+B', patternMatchShow);
 patchEventClick(patternApply, [btnPatternApply]);
+patchEventClick(patternCopy, [btnPatternCopy]);
 patchEventInput(inpPatternChanged, [inpPattern]);
 shortcutAddButton(btnPatternApply, 'Alt+A', patternApply);
 patchEventClick(gotoIndex, [btnGoIndex]);
@@ -2074,7 +2091,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-06-16 1005
+<br/>2026-06-16 1425
 </body>
 
 
