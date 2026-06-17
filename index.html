@@ -329,11 +329,17 @@ function breadCrumbCreateHtml() {
   let html = `<table border=2 class='breadcrumb'><tr>`;
   for (let bi=0; bi<breadCrumbs.length; bi++) {
     const i = breadCrumbs[bi];
-    const e = wordList.get(i);
-    html += `<td class='breadcrumb' onclick='breadCrumbGoto(${bi});'>#${i}:${e.getWord()}</a></td>`;
+    const e = wordList.get(i-1);
+    const w = e?e.getWord():'???';
+    html += `<td class='breadcrumb' onclick='breadCrumbGoto(${bi});'>#${i}:${w}</a></td>`;
   }
   html += `</tr></table>`;
   return html;
+}
+
+async function doBreadCrumbAdd(event) {
+  breadCrumbAdd(wordList.getCurrentIndex(true));
+  divBreadCrumbs.innerHTML = breadCrumbCreateHtml();
 }
 
 function saveTextToFile(txt, filename) {
@@ -1198,7 +1204,7 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
   }
 
   const nMust = sarr.reduce((count, entry) => entry.must ? count+1 : count, 0);
-  if (nMust < minLength) minLength = nMust;
+  //--//if ((nMust > 0) && (nMust < minLength)) minLength = nMust;
   const res = [];
   await progressPanel.start(sa.length, 'Search');
   for (let i=0; i<sa.length; i++) {
@@ -1212,15 +1218,53 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
         index: i,
       })
     });
+
+    function findMustThis(r) {
+      return r.reduce((count, entry)=>entry.b.must ? count+1 : count, 0);
+    }
+
+    function findIndexRangeA(r) {
+      const res = {
+        lo: -1,
+        hi: -1,
+      };
+      if (!r) return res;
+      for (let i=r.length-1; i>=0; i--) {
+        const re = r[i];
+        if (re.b.apply) {
+          res.hi = re.a.index;
+          break;
+        }
+      }
+      if (r.length > 0) {
+        res.lo = r[0].a.index;
+      }
+      return res;
+    }
+
     const r = lcsWithGapConstraints(wehb, sarr, options);
     if (r.length >= minLength) {
       // Now check whether we have all the required glyphs in the sequence
-      const nMustThis = r.reduce((count,entry)=> entry.b.must ? count+1 : count, 0);
+      const nMustThis = findMustThis(r);
       if (nMustThis >= nMust) {
-        res.push({
-          index: idx,
-          result: r,
-        });
+        const ne = {
+          index:idx,
+          result:r,
+        }
+        res.push(ne);
+        // Now find any other repeat patterns in the same word...
+        let range = findIndexRangeA(ne.result);
+        while ((range.lo>=0) || (range.hi>=0)) {
+          options.startA = (range.hi < 0 ? range.lo : range.hi)+1;
+          const rr = lcsWithGapConstraints(wehb, sarr, options);
+          const nMustThis = findMustThis(rr);
+          range = findIndexRangeA(rr);
+          if (nMustThis >= nMust) {
+            // Push these rr results into the current
+            rr.forEach(rre=>ne.result.push(rre));
+          }
+        }
+        delete options.startA;
       }
     }
   }
@@ -1479,9 +1523,19 @@ function gotoIndex() {
   if (isNaN(txt)) {
     // Perform a search...
     txt = txt.trim();
+    if (txt.startsWith('/') && txt.endsWith('/')) {
+      txt = new RegExp(txt.slice(1, -1), 'u');
+    }
     for (let i=wordList.getCurrentIndex()+1; i<wordList.length(); i++) {
       const we = wordList.get(i);
-      if (we.getWord().search(txt) >= 0) {
+      let matches = false;
+      const word = we.getWord();
+      if (typeof txt !== 'object') {
+        matches = word.search(txt) >= 0;
+      } else {
+        matches = txt.test(word);
+      }
+      if (matches) {
         const ls = window.localStorage;
         ls.setItem('index', i+1);
         refreshSVG(null, i+1, true);
@@ -1985,7 +2039,7 @@ function toggleShowBefore(e) {
   </p>
 </td>
 </tr>
-<td align='right'>History</td>
+<td align='right'><button id='btnBreadCrumbAdd'>History</button></td>
 <td colspan=2>
   <div id='divBreadCrumbs'></div>
 </td>
@@ -2065,6 +2119,7 @@ patchEventClick(patternCopy, [btnPatternCopy]);
 patchEventInput(inpPatternChanged, [inpPattern]);
 shortcutAddButton(btnPatternApply, 'Alt+A', patternApply);
 patchEventClick(gotoIndex, [btnGoIndex]);
+patchEventClick(doBreadCrumbAdd, [btnBreadCrumbAdd]);
 
 patchDragDrop(ddFiles, handleDropFiles);
 const ddFilesDT = new DoubleTapDetector(ddFiles, () => {
@@ -2091,7 +2146,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-06-16 1425
+<br/>2026-06-17 0900
 </body>
 
 
