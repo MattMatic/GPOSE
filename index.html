@@ -135,6 +135,13 @@ dialog {
   visibility: visible;
   opacity: 1;
 }
+.mru-trigger { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; }
+.field { position: relative; margin-bottom: 28px; }
+.mru-trigger:hover { background: #f2f2f2; }
+.hint { font-size: 12px; color: #666; margin-top: 4px; }
+.actions { margin-top: 6px; display: flex; gap: 8px; }
+button.action { font-size: 12px; padding: 4px 10px; }
+.textarea-mru-item:hover { background: #e8f0fe; }
 
 </style>
 </head>
@@ -152,6 +159,7 @@ dialog {
 <script type="text/javascript" src="./js/shortcut.js"></script>
 <script type="text/javascript" src="./js/jszip.min.js"></script>
 <script type="text/javascript" src="./js/FileSaver.min.js"></script>
+<script type="text/javascript" src="./js/textarea-mru.js"></script>
 
 <script type="module" async defer>
 'use strict';
@@ -1211,7 +1219,7 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
   }
 
   const nMust = sarr.reduce((count, entry) => entry.must ? count+1 : count, 0);
-  //--//if ((nMust > 0) && (nMust < minLength)) minLength = nMust;
+  if ((nMust > 0) && (nMust < sarr.length)) minLength = nMust;
   const res = [];
   await progressPanel.start(sa.length, 'Search');
   for (let i=0; i<sa.length; i++) {
@@ -1401,6 +1409,8 @@ function getFilteredList() {
 async function patternMatchFind() {
   const searchText = inpPattern.value;
 
+  inpPatternMRU.add(searchText);
+
   const minLength = parseInt(txtMinMatch.value);
   const maxGap = parseInt(txtMaxGap.value);
 
@@ -1522,6 +1532,7 @@ async function patternApply(event) {
 
 async function patternCopy(event) {
   const results = patternApplication.results;
+  if (!results) return;
   const max = results.length;
   let txt = '';
   for (let i=0; i<max; i++) {
@@ -1742,6 +1753,7 @@ function doDownloadList() {
     txt += `${entry.getWord()}\t${entry.getQualityString()}\t"${entry.note}"\r\n`;
   }
   saveTextToFile(txt, `list.${sa.name}.${DateTimeForFilename()}.txt`);
+  dlgPatternOperations.close();
 }
 
 // Paste from clipboard to the pattern list
@@ -1787,16 +1799,14 @@ async function doPasteList(event) {
   }
   await progressPanel.done();
 
-  if (!event.ctrlKey) wordList.filtered.pattern = [];
-  const set = new Set(wordList.filtered.pattern);
-  for (const v of list) set.add(v);
-  const arr = Array.from(set).sort();
-  wordList.filtered.pattern = arr;
-  radClassPattern.disabled = wordList.filtered.pattern.length == 0;
+  setPatternList(list, event.ctrlKey);
 
-  refreshSVG();
-  showTrafficLights();
-  showStatistics();
+  dlgPatternOperations.close();
+}
+
+function doPatternDialogShow() {
+  buildPatternBins();
+  dlgPatternOperations.showModal();
 }
 
 function onBeforeChanged(e) {
@@ -1809,6 +1819,102 @@ function onBeforeChanged(e) {
 function toggleShowBefore(e) {
   cbBefore.checked = !cbBefore.checked;
   onBeforeChanged(e);
+}
+
+const patternBins = [];
+
+function getPatternList() {
+  return wordList.filtered.pattern ?? [];
+}
+
+function setPatternList(list, merge) {
+  if (!merge) wordList.filtered.pattern = [];
+  const set = new Set(wordList.filtered.pattern);
+  if (list) for (const v of list) set.add(v);
+  wordList.filtered.pattern = Array.from(set).sort();
+  radClassPattern.disabled = wordList.filtered.pattern.length == 0;
+
+  refreshSVG();
+  showTrafficLights();
+  showStatistics();
+}
+
+function doGetPatternBin(event, i) {
+  // Copy from patternBins[i] to the pattern list...
+  if (event.ctrlKey) inpPattern.value = '(multiple)';
+  setPatternList(patternBins[i]?.list, event.ctrlKey);
+  dlgPatternOperations.close();
+}
+
+function doSetPatternBin(event, i) {
+  // Copy from pattern list to patternBins[i]...
+  const bin = {};
+  const results = getPatternList();
+  if (results) {
+    bin.list = [];
+    const max = results.length;
+    for (let i=0; i<max; i++) {
+      const res = results[i];
+      bin.list.push(res);
+    }    
+  }
+  bin.pattern = inpPattern.value;
+  patternBins[i] = bin;
+  dlgPatternOperations.close();
+}
+
+function doClearPatternBin(event, i) {
+  patternBins[i] = {};
+  //--//dlgPatternOperations.close();
+  buildPatternBins();
+}
+
+async function doPatternListCopy(event) {
+  const results = getPatternList();
+  const max = results.length;
+  let txt = '';
+  for (let i=0; i<max; i++) {
+    const res = results[i];
+    const we = wordList.get(res);
+    txt += `${we.getWord()}\r\n`;
+  }
+  await navigator.clipboard.writeText(txt);
+  window.alert(`Copied ${max} words`);
+  dlgPatternOperations.close();
+}
+
+function ellipsizeMiddle(str, max) {
+    if (str.length <= max) return str;
+    const half = Math.floor(max / 2);
+    return str.slice(0, half) + "..." + str.slice(-half);
+}
+
+function buildPatternBins() {
+  let html = `<table border=1>`;
+  const max = 8;
+  for (let i=0; i<max; i++) {
+    if (!patternBins[i]) patternBins[i] = {};
+    const bin = patternBins[i];
+    html += `<tr><th>Bin #${i+1} : </th>`;
+    const ok = (bin.list && bin.list.length);
+
+    if (ok) {
+      html += `<td><button onclick='doGetPatternBin(event, ${i});'>Get</button></td>`;
+      html += `<td>${bin.list.length} words</td>`;
+    }
+    else {
+      html += `<td> - </td>`;
+      html += `<td> - </td>`;
+    }
+    html += `<td><button onclick='doSetPatternBin(event, ${i});'>Set</button></td>`;
+    html += `<td><button onclick='doClearPatternBin(event, ${i});'>Clear</button></td>`;
+    if (ok) {
+      html += `<td><font class='mono' size=-1>${ellipsizeMiddle(bin.pattern, 60)}</font></td>`;
+    }
+    html += '</tr>\r\n';
+  }
+  html += `</table>`;
+  divPatternBins.innerHTML = html;
 }
 
 </script>
@@ -1838,7 +1944,10 @@ function toggleShowBefore(e) {
       <td valign="top">Pattern:</td>
       <td colspan=2>
         <!--<input style='width:100%;' class='pattern_input' type='text' id='inpPattern'/>-->
-        <textarea id='inpPattern' class='pattern_input' style='width:100%;' rows='2'></textarea>
+        <div class='field'>
+          <textarea id='inpPattern' class='pattern_input' style='width:100%;' rows='2'></textarea>
+          <button class="mru-trigger" id="pattern-trigger" type="button" aria-label="Show history">&#8623;</button>
+        </div>
         <div class='tooltip-container'>
           (Mouse over for hints)
           <div class='tooltip'>
@@ -1893,6 +2002,16 @@ function toggleShowBefore(e) {
       </td>
     </tr>
   </table>
+</dialog>
+
+<dialog id='dlgPatternOperations'>
+  <button type='submit' aria-label='close' onclick='dlgPatternOperations.close();'>X</button>
+  <h3>Pattern List Operations</h2>
+  <button id='btnPasteList' title='Hold Ctrl key to merge into pattern list'>Paste from Clipboard</button>
+  <br/><button id='btnPatternListCopy'>Copy to Clipboard</button>
+  <br/><button id='btnDownloadList'>Download to file</button>
+  <h3>Pattern Bins</h3>
+  <div id='divPatternBins'></div>
 </dialog>
 
 <div id='divLOAD'>
@@ -1993,8 +2112,7 @@ function toggleShowBefore(e) {
         <td><button id='btnLast'  accesskey='4'>Last (Alt-4)</button></td>
         <td>&nbsp;</td>
         <td align='center'>
-          <button id='btnDownloadList'>Download</button>
-          <br/><button id='btnPasteList' title='Hold Ctrl key to merge into pattern list' >Paste</button>
+          <button id='btnPatternDialogShow'>...</button>
         </td>
       </tr>
     </table>
@@ -2156,6 +2274,8 @@ const divWordDT = new DoubleTapDetector(divWord, () => {
 patchEventClick(processWordsInitial, [btnProcessWords]);
 patchEventClick(doDownloadList, [btnDownloadList]);
 patchEventClick(doPasteList, [btnPasteList]);
+patchEventClick(doPatternListCopy, [btnPatternListCopy]);
+patchEventClick(doPatternDialogShow, [btnPatternDialogShow]);
 
 patchEventInput(inpIndexChanged, [inpIndex]);
 
@@ -2165,10 +2285,16 @@ window.addEventListener('beforeunload', (e)=>{
   return msg;
 });
 
+let inpPatternMRU = TextareaMRU.attach(inpPattern, {
+  trigger: document.getElementById('pattern-trigger'),
+  storageKey: 'pattern-mru',
+  maxItems: 20,
+});
+
 
 </script>
 
-<br/>2026-06-18 1140
+<br/>2026-06-18 1415
 </body>
 
 
