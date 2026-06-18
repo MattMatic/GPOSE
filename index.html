@@ -1219,7 +1219,7 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
   }
 
   const nMust = sarr.reduce((count, entry) => entry.must ? count+1 : count, 0);
-  if ((nMust > 0) && (nMust < sarr.length)) minLength = nMust;
+  if (minLength > sarr.length) minLength = sarr.length;
   const res = [];
   await progressPanel.start(sa.length, 'Search');
   for (let i=0; i<sa.length; i++) {
@@ -2294,7 +2294,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-06-18 1415
+<br/>2026-06-18 1515
 </body>
 
 
