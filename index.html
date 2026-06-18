@@ -1128,7 +1128,7 @@ function splitInfoToGlyphs(txt) {
     for (let idx=0; idx<arr.length; idx++) {
       const g = arr[idx];
       if (!g) continue;
-      const m = g.match(/([\*\+]*)\s*(.+)/u);
+      const m = g.match(/([\*\+!\^\$]*)\s*(.+)/u);
       const gd = parseGlyphDelta(m[2]);
       if (!m) continue;
       const hasAsterisk = (m[1].includes('*'));
@@ -1139,6 +1139,9 @@ function splitInfoToGlyphs(txt) {
         delta: gd.deltas,
         apply: hasAsterisk,
         must : hasInclude || hasAsterisk,
+        invert   : (m[1].includes('!')),
+        locStart : (m[1].includes('^')),
+        locEnd   : (m[1].includes('$')),
       })
     }
   }
@@ -1166,6 +1169,27 @@ function compareDeltaValue(a, b) {
   return (a === b);
 }
 
+function areGlyphsEqual(a, b) {
+  const ga = a.glyph;
+  const gb = b.glyph;
+  let res = b.invert;
+  if (typeof gb !== 'object') {
+    res ^= (gb === ga);
+  } else {
+    res ^= gb.test(ga);
+  }
+  if (!res) return false;
+
+  // Check for deltas...
+  if (!b.delta) return true;
+  const hbd = we.delta[a.index];
+  if (!compareDeltaValue(b.delta.dx, hbd.dx)) return false;
+  if (!compareDeltaValue(b.delta.dy, hbd.dy)) return false;
+  if (!compareDeltaValue(b.delta.ax, hbd.ax)) return false;
+  if (!compareDeltaValue(b.delta.ay, hbd.ay)) return false;
+  return true;  
+}
+
 async function patternMatchExtract(sa, searchText, minLength, maxGap) {
   let we; // WordEntry
   function buildPatternSourceArray(txt) {
@@ -1176,28 +1200,11 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
         sarr[i].glyph = new RegExp(rule.slice(1, -1), 'u');
       }
     }
-    sarr.areEqual = function(a,b) {
-      const ga = a.glyph;
-      const gb = b.glyph;
-      if (typeof gb !== 'object') {
-        if (ga !== gb) return false;
-      } else {
-        if (!gb.test(ga)) return false;
-      }
-      // Check for deltas...
-      if (!b.delta) return true;
-      const hbd = we.delta[a.index];
-      if (!compareDeltaValue(b.delta.dx, hbd.dx)) return false;
-      if (!compareDeltaValue(b.delta.dy, hbd.dy)) return false;
-      if (!compareDeltaValue(b.delta.ax, hbd.ax)) return false;
-      if (!compareDeltaValue(b.delta.ay, hbd.ay)) return false;
-      return true;
-    }
     return sarr;
   }
   const sarr = buildPatternSourceArray(searchText);
   const options = {
-    equals: sarr.areEqual,
+    equals: areGlyphsEqual,
     minLength: minLength,
     maxGapA: maxGap,
     maxGapB: maxGap,
@@ -1219,8 +1226,19 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
       })
     });
 
-    function findMustThis(r) {
+    function countMust(r) {
       return r.reduce((count, entry)=>entry.b.must ? count+1 : count, 0);
+    }
+
+    function checkPositions(r) {
+      if (r.length > 0) {
+        const ef = r[0];
+        const el = r[r.length-1];
+
+        if (ef.b.locStart && (ef.a.index != 0)) return false;
+        if (el.b.locEnd && (el.a.index != (wehb.length-1))) return false;
+      }
+      return true;
     }
 
     function findIndexRangeA(r) {
@@ -1245,8 +1263,8 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
     const r = lcsWithGapConstraints(wehb, sarr, options);
     if (r.length >= minLength) {
       // Now check whether we have all the required glyphs in the sequence
-      const nMustThis = findMustThis(r);
-      if (nMustThis >= nMust) {
+      const nMustThis = countMust(r);
+      if (checkPositions(r) && (nMustThis >= nMust)) {
         const ne = {
           index:idx,
           result:r,
@@ -1257,9 +1275,9 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
         while ((range.lo>=0) || (range.hi>=0)) {
           options.startA = (range.hi < 0 ? range.lo : range.hi)+1;
           const rr = lcsWithGapConstraints(wehb, sarr, options);
-          const nMustThis = findMustThis(rr);
+          const nMustThis = countMust(rr);
           range = findIndexRangeA(rr);
-          if (nMustThis >= nMust) {
+          if (checkPositions(rr) && (nMustThis >= nMust)) {
             // Push these rr results into the current
             rr.forEach(rre=>ne.result.push(rre));
           }
@@ -1825,7 +1843,11 @@ function toggleShowBefore(e) {
           (Mouse over for hints)
           <div class='tooltip'>
             <h3>Prefix</h3>
-            `<span class="mono"><font color='red'>+</font></span>` must exist; `<span class="mono"><font color='red'>*</font></span>` adjust glyph (implies `+`) - <em>no space before glyph name</em>!
+            `<span class="mono"><font color='red'>!</font></span>` invert compare;  
+            `<span class="mono"><font color='red'>+</font></span>` must exist; 
+            `<span class="mono"><font color='red'>^</font></span>` first glyph; 
+            `<span class="mono"><font color='red'>$</font></span>` last glyph; 
+            `<span class="mono"><font color='red'>*</font></span>` adjust glyph (implies `+`) - <em>no space before glyph name</em>!
 
             <h3>Delta</h3>
             Use form `<span class="mono">GLYPH<font color='red'>&lt;ID:VAL,ID:VAL&gt;</font></span>`
@@ -2146,7 +2168,7 @@ window.addEventListener('beforeunload', (e)=>{
 
 </script>
 
-<br/>2026-06-17 0900
+<br/>2026-06-18 1140
 </body>
 
 
