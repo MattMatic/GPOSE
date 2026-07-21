@@ -1177,27 +1177,6 @@ function compareDeltaValue(a, b) {
   return (a === b);
 }
 
-function areGlyphsEqual(a, b) {
-  const ga = a.glyph;
-  const gb = b.glyph;
-  let res = b.invert;
-  if (typeof gb !== 'object') {
-    res ^= (gb === ga);
-  } else {
-    res ^= gb.test(ga);
-  }
-  if (!res) return false;
-
-  // Check for deltas...
-  if (!b.delta) return true;
-  const hbd = we.delta[a.index];
-  if (!compareDeltaValue(b.delta.dx, hbd.dx)) return false;
-  if (!compareDeltaValue(b.delta.dy, hbd.dy)) return false;
-  if (!compareDeltaValue(b.delta.ax, hbd.ax)) return false;
-  if (!compareDeltaValue(b.delta.ay, hbd.ay)) return false;
-  return true;  
-}
-
 async function patternMatchExtract(sa, searchText, minLength, maxGap) {
   let we; // WordEntry
   function buildPatternSourceArray(txt) {
@@ -1210,6 +1189,27 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
     }
     return sarr;
   }
+  function areGlyphsEqual(a, b) {
+    const ga = a.glyph;
+    const gb = b.glyph;
+    let res = b.invert;
+    if (typeof gb !== 'object') {
+      res ^= (gb === ga);
+    } else {
+      res ^= gb.test(ga);
+    }
+    if (!res) return false;
+
+    // Check for deltas...
+    if (!b.delta) return true;
+    const hbd = we.delta[a.index];
+    if (!compareDeltaValue(b.delta.dx, hbd.dx)) return false;
+    if (!compareDeltaValue(b.delta.dy, hbd.dy)) return false;
+    if (!compareDeltaValue(b.delta.ax, hbd.ax)) return false;
+    if (!compareDeltaValue(b.delta.ay, hbd.ay)) return false;
+    return true;  
+  }
+
   const sarr = buildPatternSourceArray(searchText);
   const options = {
     equals: areGlyphsEqual,
@@ -2294,7 +2294,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-06-18 1515
+<br/>2026-07-21 1120
 </body>
 
 
