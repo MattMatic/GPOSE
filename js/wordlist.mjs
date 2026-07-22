@@ -381,12 +381,11 @@ class WordList {
     const {addNewWords = true} = options;
       let wse = this.findWord(de.w);
       if (!wse && addNewWords) {
-        const we = new WordListEntry(de.w);
-        we.setDirection(de.dir);
-        we.shape(this);
-        we.evaluate(this, options);
-        this.list.push(we);
-        wse = we;
+        this.addWord(de.w);
+        wse = this.findWord(de.w);
+        wse.setDirection(de.dir);
+        wse.shape(this);
+        wse.evaluate(this, options);
         this._unfound++;
       } else {
         this._found++;
