@@ -380,13 +380,15 @@ class WordList {
   applyDeltaArrayEntry(de, options={}) {
     const {addNewWords = true} = options;
       let wse = this.findWord(de.w);
-      if (!wse && addNewWords) {
-        this.addWord(de.w);
-        wse = this.findWord(de.w);
-        wse.setDirection(de.dir);
-        wse.shape(this);
-        wse.evaluate(this, options);
+      if (!wse) {
         this._unfound++;
+        if (addNewWords) {
+          this.addWord(de.w);
+          wse = this.findWord(de.w);
+          wse.setDirection(de.dir);
+          wse.shape(this);
+          wse.evaluate(this, options);
+        }
       } else {
         this._found++;
         if (de.dir && (de.dir !== wse.getDirection())) {

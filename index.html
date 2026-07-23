@@ -957,10 +957,11 @@ async function loadDeltaFileProcess(txt, showAlert=true) {
   const gpose = JSON5.parse(txt);
   //res = wordList.applyDeltaArrayFromLoad(gpose.delta);
   const max = gpose.delta.length;
+  const options = {addNewWords:cbAppend.checked};
   await progressPanel.start(max, 'Apply', true);
   for (let i=0; i<max; i++) {
     const de = gpose.delta[i];
-    wordList.applyDeltaArrayEntry(de);
+    wordList.applyDeltaArrayEntry(de, options);
     await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;
   }
@@ -2049,6 +2050,7 @@ function buildPatternBins() {
       <td>4. GPOSE file (optional)</td>
       <td id='ddJSONFile'>
         Drag .GPOSE file
+        <br/><input type='checkbox' id='cbAppend'><label for='cbAppend'>Append New Words</label></input>
       </td>
       <td><span id='ddGPOSEFileName'></span></td>
       <td><span id='ddGPOSEFileResult'></span></td>
@@ -2294,7 +2296,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-07-22 1115
+<br/>2026-07-23 1125
 </body>
 
 
