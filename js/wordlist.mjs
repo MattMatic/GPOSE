@@ -374,6 +374,7 @@ class WordList {
     });
     return da;
   }
+
   /*
    * Apply a deltaArray that has been loaded from JSON5
    */
@@ -388,6 +389,8 @@ class WordList {
           wse.setDirection(de.dir);
           wse.shape(this);
           wse.evaluate(this, options);
+        } else {
+          return false;
         }
       } else {
         this._found++;
@@ -412,6 +415,7 @@ class WordList {
         });
         // Now apply the delta
         wse.evaluate(this, options);
+        return true;
       }
   }
   applyDeltaArrayFromLoad(da, options={}) {

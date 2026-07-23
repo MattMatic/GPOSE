@@ -957,11 +957,14 @@ async function loadDeltaFileProcess(txt, showAlert=true) {
   const gpose = JSON5.parse(txt);
   //res = wordList.applyDeltaArrayFromLoad(gpose.delta);
   const max = gpose.delta.length;
+  const removed = [];
   const options = {addNewWords:cbAppend.checked};
   await progressPanel.start(max, 'Apply', true);
   for (let i=0; i<max; i++) {
     const de = gpose.delta[i];
-    wordList.applyDeltaArrayEntry(de, options);
+    if (!wordList.applyDeltaArrayEntry(de, options)) {
+      removed.push(de.w);
+    }
     await progressPanel.setProgress(i);
     if (progressPanel.aborted()) break;
   }
@@ -969,9 +972,14 @@ async function loadDeltaFileProcess(txt, showAlert=true) {
   if (showAlert) {
     window.alert(`Processed ${res.found}. ${res.unfound} new`);
   }
+  window._deltaRemoved = removed;
   wordList.buildDeltaChoices();
   refreshSVG(null, null, true);
   showTrafficLights();
+}
+
+function saveDeltaRemoved() {
+  saveTextToFile(JSON.stringify(_deltaRemoved, null, 1), 'delta-removed.json')  
 }
 
 async function loadDeltaFileLoad(file) {
@@ -2296,7 +2304,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-07-23 1125
+<br/>2026-07-23 1550
 </body>
 
 
