@@ -1957,6 +1957,7 @@ function onBeforeChanged(e) {
 }
 
 function toggleShowBefore(e) {
+  if (document.querySelector('dialog[open]')) return; // cbBefore is inert behind a modal dialog; don't flip it invisibly
   cbBefore.checked = !cbBefore.checked;
   onBeforeChanged(e);
 }
@@ -2444,7 +2445,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-11 1455
+<br/>2026-08-11 1540
 </body>
 
 
