@@ -2066,13 +2066,13 @@ function buildPatternBins() {
     <tr>
       <td width='10%' valign="top">Source List:</td>
       <td colspan=2>
-        <input type='radio' id='radPatternAll'       name='radPattern' value='all' checked>All</input>
-        <input type='radio' id='radPatternCollision' name='radPattern' value='collision'>Collision</input>
-        <input type='radio' id='radPatternNear'      name='radPattern' value='near'>Near</input>
-        <input type='radio' id='radPatternKerning'   name='radPattern' value='kerning'>Kerning</input>
-        <input type='radio' id='radPatternMaybe'     name='radPattern' value='maybe'>Maybe</input>
-        <input type='radio' id='radPatternPattern'   name='radPattern' value='pattern'>Pattern</input>
-        <input type='radio' id='radPatternEdited'    name='radPattern' value='edited'>Edited</input>
+        <input type='radio' id='radPatternAll'       name='radPattern' value='all' checked>A<u>l</u>l</input>
+        <input type='radio' id='radPatternCollision' name='radPattern' value='collision'><u>C</u>ollision</input>
+        <input type='radio' id='radPatternNear'      name='radPattern' value='near'><u>N</u>ear</input>
+        <input type='radio' id='radPatternKerning'   name='radPattern' value='kerning'><u>K</u>erning</input>
+        <input type='radio' id='radPatternMaybe'     name='radPattern' value='maybe'><u>M</u>aybe</input>
+        <input type='radio' id='radPatternPattern'   name='radPattern' value='pattern'><u>P</u>attern</input>
+        <input type='radio' id='radPatternEdited'    name='radPattern' value='edited'>E<u>d</u>ited</input>
       </td>
     </tr>
     <tr>
@@ -2395,6 +2395,15 @@ patchEventInput(updateClassChoice, [radClassAll, radClassCollision, radClassNear
 
 patchEventClick(patternMatchShow, [btnPatternDialog]);
 shortcutAddButton(btnPatternDialog, 'Alt+B', patternMatchShow);
+
+shortcut.add('Alt+L', () => radPatternAll.click());
+shortcut.add('Alt+C', () => radPatternCollision.click());
+shortcut.add('Alt+N', () => radPatternNear.click());
+shortcut.add('Alt+K', () => radPatternKerning.click());
+shortcut.add('Alt+M', () => radPatternMaybe.click());
+shortcut.add('Alt+P', () => radPatternPattern.click());
+shortcut.add('Alt+D', () => radPatternEdited.click());
+
 patchEventClick(patternApply, [btnPatternApply]);
 patchEventClick(patternCopy, [btnPatternCopy]);
 patchEventInput(inpPatternChanged, [inpPattern]);
@@ -2435,7 +2444,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-11 1450
+<br/>2026-08-11 1455
 </body>
 
 
