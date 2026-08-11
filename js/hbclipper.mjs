@@ -49,7 +49,7 @@ const clipperRegistry = new FinalizationRegistry((ps64) => {
   }
 });
 
-Promise.all(promises).then(([aClipper2Z]) => {
+const clipperReady = Promise.all(promises).then(([aClipper2Z]) => {
   Clipper2Z = aClipper2Z;
 });
 
@@ -666,4 +666,5 @@ export {
   CPaths64,
   HarfBuzzGlyphs,
   Clipper2Z,
+  clipperReady,
 };

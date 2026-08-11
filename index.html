@@ -164,11 +164,12 @@ button.action { font-size: 12px; padding: 4px 10px; }
 <script type="module" async defer>
 'use strict';
 
-import { HarfBuzzShaping, jsonToSvg } from './js/hbshaping.mjs';
+import { HarfBuzzShaping, jsonToSvg, CursivesSets, MarksSets } from './js/hbshaping.mjs';
 import { CPaths64, HarfBuzzGlyphs, Clipper2Z, clipperGC } from './js/hbclipper.mjs';
 import { FontForceField, FORCEFIELD_QUALITY } from './js/fontforcefield.mjs';
 import { lcsWithGapConstraints } from './js/lcsgap.mjs';
 import { WordListEntry, WordList } from './js/wordlist.mjs';
+import { ShapePool } from './js/workerpool.mjs';
 import JSON5 from './js/json5.index.min.mjs';
 //import { BSON, EJSON } from './js/bson.mjs';
 
@@ -179,6 +180,52 @@ const hbg = new HarfBuzzGlyphs;
 const fff = new FontForceField(hbg);
 
 const wordList = new WordList(hbs, fff);
+
+const shapePool = new ShapePool();
+let shapePoolReady = null;
+let lastJsonText = null;
+
+function maybeInitShapePool() {
+  if (!hbs.fontBlob || !lastJsonText) return;
+  shapePoolReady = shapePool.init(hbs.fontBlob, lastJsonText)
+    .then(() => true)
+    .catch(err => {
+      console.warn('ShapePool init failed; falling back to sequential processing', err);
+      return false;
+    });
+}
+
+async function getShapePool() {
+  if (!shapePoolReady) return null;
+  const ok = await shapePoolReady;
+  return ok ? shapePool : null;
+}
+
+function restoreAttachmentPrototypes(hb) {
+  if (hb && hb.attachments) {
+    if (hb.attachments.cursives) Object.setPrototypeOf(hb.attachments.cursives, CursivesSets.prototype);
+    if (hb.attachments.marks) Object.setPrototypeOf(hb.attachments.marks, MarksSets.prototype);
+  }
+  return hb;
+}
+
+function applyShapeResult(entry, r) {
+  restoreAttachmentPrototypes(r.hb);
+  entry.hb = r.hb;
+  entry.delta = r.delta;
+  entry.ev = r.ev;
+  entry.note = r.note;
+}
+
+function onFontOrJsonLoaded(jsonText) {
+  if (typeof jsonText === 'string') lastJsonText = jsonText;
+  maybeInitShapePool();
+}
+
+window.getShapePool = getShapePool;
+window.applyShapeResult = applyShapeResult;
+window.restoreAttachmentPrototypes = restoreAttachmentPrototypes;
+window.onFontOrJsonLoaded = onFontOrJsonLoaded;
 
 const promises = [
   createHarfBuzz()
@@ -288,6 +335,8 @@ async function loadJson(url) {
   const jsonText = await response.text();
   console.log('loadJson', 'done'); //~~~~
   await fff.applyJsonText(jsonText);
+  lastJsonText = jsonText;
+  maybeInitShapePool();
 }
 
 //loadWordList('samples/UniqueWords.20260204_082138.txt');
@@ -391,11 +440,22 @@ async function shapeWords(count) {
   if (count > max) count = max;
   await progressPanel.start(count, 'Shaping');
   myYield();
-  for (let i=0; i<count; i++) {
-    if (!(i%1000)) console.log(`...${Math.round(i/count*100)}%`);
-    wordList.shape(i, true);
-    await progressPanel.setProgress(i);
-    myYield();
+  const pool = await getShapePool();
+  if (pool) {
+    const jobs = [];
+    for (let i=0; i<count; i++) {
+      const entry = wordList.get(i);
+      jobs.push({ ref: i, word: entry.w, direction: entry.getDirection(), needsShape: true, gposGids: true });
+    }
+    const results = await pool.process(jobs, evaluateOptions, (done) => progressPanel.setProgress(done));
+    results.forEach((r, ref) => applyShapeResult(wordList.get(ref), r));
+  } else {
+    for (let i=0; i<count; i++) {
+      if (!(i%1000)) console.log(`...${Math.round(i/count*100)}%`);
+      wordList.shape(i, true);
+      await progressPanel.setProgress(i);
+      myYield();
+    }
   }
   await progressPanel.done();
   const te = performance.now();
@@ -960,13 +1020,71 @@ async function loadDeltaFileProcess(txt, showAlert=true) {
   const removed = [];
   const options = {addNewWords:cbAppend.checked};
   await progressPanel.start(max, 'Apply', true);
-  for (let i=0; i<max; i++) {
-    const de = gpose.delta[i];
-    if (!wordList.applyDeltaArrayEntry(de, options)) {
-      removed.push(de.w);
+
+  const pool = await getShapePool();
+  if (pool) {
+    // Pass A: sequential dedupe/bookkeeping (mutates wordList.map/list, must stay single-threaded)
+    const jobs = [];
+    const refToEntry = new Map();
+    for (let i=0; i<max; i++) {
+      const de = gpose.delta[i];
+      let wse = wordList.findWord(de.w);
+      let needsShape = false;
+      if (!wse) {
+        if (options.addNewWords) {
+          wordList.addWord(de.w);
+          wse = wordList.findWord(de.w);
+          wse.setDirection(de.dir);
+          needsShape = true;
+        } else {
+          removed.push(de.w);
+          wse = null;
+        }
+      } else if (de.dir && (de.dir !== wse.getDirection())) {
+        wse.setDirection(de.dir);
+        needsShape = true;
+      }
+      if (wse) {
+        refToEntry.set(i, wse);
+        jobs.push({
+          ref: i,
+          word: wse.w,
+          direction: wse.getDirection(),
+          needsShape,
+          gposGids: undefined,
+          hb: needsShape ? undefined : wse.hb,
+          deltaOverrides: de.d,
+        });
+      }
+      if (progressPanel.aborted()) break;
     }
-    await progressPanel.setProgress(i);
-    if (progressPanel.aborted()) break;
+
+    // Pass B: parallel shape/evaluate crunch
+    let results = new Map();
+    if (jobs.length > 0 && !progressPanel.aborted()) {
+      results = await pool.process(jobs, options, (done) => {
+        progressPanel.setProgress(done);
+        if (progressPanel.aborted()) pool.abort();
+      });
+    }
+
+    // Pass C: write back in original file order, so a word repeated in the
+    // delta file ends up with the same "last occurrence wins" result as the
+    // sequential path, regardless of which worker finished first.
+    for (let i=0; i<max; i++) {
+      const r = results.get(i);
+      if (r) applyShapeResult(refToEntry.get(i), r);
+    }
+    progressPanel.setProgress(max);
+  } else {
+    for (let i=0; i<max; i++) {
+      const de = gpose.delta[i];
+      if (!wordList.applyDeltaArrayEntry(de, options)) {
+        removed.push(de.w);
+      }
+      await progressPanel.setProgress(i);
+      if (progressPanel.aborted()) break;
+    }
   }
   await progressPanel.done();
   if (showAlert) {
@@ -1648,6 +1766,7 @@ async function handleDropTTF(fileObject) {
   ddFontFileName.innerText = filename;
   ddFontFileResult.innerHTML = `${hbs.getFontFullName()}<br/>${hbs.getFontVersion()}`;
   fileObject.loaded = hbs.getFontFullName();
+  onFontOrJsonLoaded();
   decideButtonProcessEnable();
 }
 
@@ -1676,13 +1795,14 @@ async function handleDropJSON(fileObject) {
   ddJSONFileName.innerText = filename;
   try {
     fff.applyJsonText(jsonText);
-  } 
+  }
   catch(e) {
     ddJSONFileResult.innerHTML = `<font color='red'>${e}</font>`;
     return;
   }
   fileObject.loaded = (jsonText && (jsonText.length > 0));
   ddJSONFileResult.innerHTML = `Loaded`;
+  onFontOrJsonLoaded(jsonText);
   decideButtonProcessEnable();
 }
 
@@ -1731,11 +1851,22 @@ async function processWordsInitial() {
 
   max = wordList.length();
   await progressPanel.start(max, 'Shaping');
-  for (let i=0; i<max; i++) {
-    wordList.shape(i, true);
-    wordList.evaluate(i, evaluateOptions);
-    await progressPanel.setProgress(i);
-    if (progressPanel.aborted()) break;   
+  const shapingPool = await getShapePool();
+  if (shapingPool) {
+    const jobs = [];
+    for (let i=0; i<max; i++) {
+      const entry = wordList.get(i);
+      jobs.push({ ref: i, word: entry.w, direction: entry.getDirection(), needsShape: true, gposGids: true });
+    }
+    const results = await shapingPool.process(jobs, evaluateOptions, (done) => progressPanel.setProgress(done));
+    results.forEach((r, ref) => applyShapeResult(wordList.get(ref), r));
+  } else {
+    for (let i=0; i<max; i++) {
+      wordList.shape(i, true);
+      wordList.evaluate(i, evaluateOptions);
+      await progressPanel.setProgress(i);
+      if (progressPanel.aborted()) break;
+    }
   }
   await progressPanel.done();
 
@@ -2304,7 +2435,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-07-23 1550
+<br/>2026-08-11 1450
 </body>
 
 
