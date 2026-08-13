@@ -2,9 +2,12 @@
 // github.com/MattMatic
 // 2026-08
 
+const MAX_WORKERS = 8;
+
 class ShapePool {
   constructor(size) {
-    this.size = size || Math.min(8, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4);
+    this.size = size || Math.min(MAX_WORKERS, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4);
+    console.log('ShapePool size ', this.size); //~~~~
     this.workers = [];
     this._nextJobId = 1;
   }
@@ -71,6 +74,7 @@ class ShapePool {
     const jobId = this._nextJobId++;
     const total = jobs.length;
     let completed = 0;
+    const dispatchStart = performance.now();
 
     const chunks = this.workers.map(() => []);
     jobs.forEach((job, i) => {
@@ -86,6 +90,7 @@ class ShapePool {
         if (settled) return;
         settled = true;
         cleanupFns.forEach(fn => fn());
+        console.log(`ShapePool.process: ${this.workers.length} workers, ${total} jobs, ${(performance.now() - dispatchStart).toFixed(0)}ms wall time`);
         resolve(results);
       };
       const fail = (err) => {
@@ -109,6 +114,7 @@ class ShapePool {
             if (onProgress) onProgress(completed, total);
           } else if (msg.op === 'done') {
             pending--;
+            console.log(`  worker ${idx}: ${chunk.length} jobs done at ${(performance.now() - dispatchStart).toFixed(0)}ms`);
             if (this._aborted) { finish(); return; }
             if (pending === 0) finish();
           } else if (msg.op === 'error') {
