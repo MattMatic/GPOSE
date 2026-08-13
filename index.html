@@ -746,6 +746,11 @@ function renderSVG(full) {
   else
     radDirAuto.checked = true;
 
+  if (entry.hb.rtl)
+    spanDirection.innerText = String.fromCodePoint(0x25c1);
+  else
+    spanDirection.innerText = String.fromCodePoint(0x25b7);
+
   if (full) {
     showStatistics();
     showTrafficLights();    
@@ -2337,6 +2342,7 @@ function buildPatternBins() {
   <td align='center'>Direction</td>
   <td>
     <input type='radio' id='radDirAuto' name='direction' value='Auto'><label for='radDirAuto' checked>Auto</label>
+    <span id='spanDirection'></span>
     <input type='radio' id='radDirLTR' name='direction' value='LTR'><label for='radDirLTR'>LTR</label>
     <input type='radio' id='radDirRTL' name='direction' value='RTL'><label for='radDirRTL'>RTL</label>
   </td>
@@ -2445,7 +2451,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-11 1540
+<br/>2026-08-13 0905
 </body>
 
 

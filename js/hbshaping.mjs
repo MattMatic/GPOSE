@@ -11,6 +11,7 @@
 "use strict";
 import * as opentype from './opentype.min.mjs';
 import Layout from './opentype.layout.gdef.mjs';
+import { guessDirection } from './guessDirection.mjs';
 
 /*
  * Class to handle pairs of cursive attachments,
@@ -237,7 +238,7 @@ class HarfBuzzShaping {
       removeFunction(traceFuncPtr);
     }
     let result = buffer.json(this.font);
-    result.rtl = ((result.length > 0) && (result[0].cl > result[result.length-1].cl));
+    result.rtl = (guessDirection(txt) === 'rtl');
     buffer.destroy();
     return result;
   }
@@ -392,7 +393,7 @@ class HarfBuzzShaping {
     const result = buffer.json(this.font);
     buffer.destroy();
 
-    result.rtl = (result.length > 0) && (result[0].cl > result[result.length-1].cl);
+    result.rtl = (guessDirection(txt) === 'rtl');
 
     if (traceKeep) {
       result.trace = trace;
