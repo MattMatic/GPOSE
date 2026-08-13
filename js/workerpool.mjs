@@ -2,9 +2,12 @@
 // github.com/MattMatic
 // 2026-08
 
+const MAX_WORKERS = 8;
+
 class ShapePool {
   constructor(size) {
-    this.size = size || Math.min(8, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4);
+    this.size = size || Math.min(MAX_WORKERS, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4);
+    console.log(`ShapePool size: ${this.size}`);
     this.workers = [];
     this._nextJobId = 1;
   }
