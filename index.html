@@ -1846,7 +1846,6 @@ async function handleDropFiles(file, event, files) {
 async function processWordsInitial() {
   btnProcessWords.disabled = true;
   let max = words.length;
-  const tAddingStart = performance.now();
   await progressPanel.start(max, 'Adding');
   for (let i=0; i<max; i++) {
     wordList.addWord(words[i]);
@@ -1854,26 +1853,19 @@ async function processWordsInitial() {
     if (progressPanel.aborted()) break;
   }
   await progressPanel.done();
-  console.log(`processWordsInitial: Adding phase ${(performance.now() - tAddingStart).toFixed(0)}ms`);
 
   max = wordList.length();
   const tShapingStart = performance.now();
   await progressPanel.start(max, 'Shaping');
   const shapingPool = await getShapePool();
   if (shapingPool) {
-    const tJobsStart = performance.now();
     const jobs = [];
     for (let i=0; i<max; i++) {
       const entry = wordList.get(i);
       jobs.push({ ref: i, word: entry.w, direction: entry.getDirection(), needsShape: true, gposGids: true });
     }
-    console.log(`processWordsInitial: build jobs ${(performance.now() - tJobsStart).toFixed(0)}ms`);
-    const tProcessStart = performance.now();
     const results = await shapingPool.process(jobs, evaluateOptions, (done) => progressPanel.setProgress(done));
-    console.log(`processWordsInitial: pool.process() returned after ${(performance.now() - tProcessStart).toFixed(0)}ms`);
-    const tWritebackStart = performance.now();
     results.forEach((r, ref) => applyShapeResult(wordList.get(ref), r));
-    console.log(`processWordsInitial: writeback ${(performance.now() - tWritebackStart).toFixed(0)}ms`);
   } else {
     for (let i=0; i<max; i++) {
       wordList.shape(i, true);
@@ -2463,7 +2455,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-13 0905
+<br/>2026-08-13 1600
 </body>
 
 
