@@ -506,4 +506,5 @@ class WordList {
 export {
   WordListEntry,
   WordList,
+  DEFAULT_IGNORABLE_CODEPOINTS,
 }
