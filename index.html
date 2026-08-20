@@ -170,6 +170,7 @@ import { FontForceField, FORCEFIELD_QUALITY } from './js/fontforcefield.mjs';
 import { lcsWithGapConstraints } from './js/lcsgap.mjs';
 import { WordListEntry, WordList } from './js/wordlist.mjs';
 import { ShapePool } from './js/workerpool.mjs';
+import { findDuplicateClusters, printDuplicateClusters } from './js/findduplicates.mjs';
 import JSON5 from './js/json5.index.min.mjs';
 //import { BSON, EJSON } from './js/bson.mjs';
 
@@ -253,6 +254,8 @@ window.JSON5 = JSON5;
 //window.EJSON = EJSON;
 window.lcsWithGapConstraints = lcsWithGapConstraints;
 window.wordList = wordList;
+window.findDuplicateClusters = findDuplicateClusters;
+window.printDuplicateClusters = printDuplicateClusters;
 
 
 async function loadFontTo(hbsObject, fontUrl) {
@@ -1989,6 +1992,50 @@ function setPatternList(list, merge) {
   showStatistics();
 }
 
+let lastDuplicateResults = null;
+
+async function doDupScan() {
+  btnDupAddToPattern.disabled = true;
+  divDupSummary.innerHTML = '<i>Scanning...</i>';
+  lastDuplicateResults = await findDuplicateClusters(wordList, hbs);
+  const mismatchCount = lastDuplicateResults.filter(r => r.mismatches.length > 0).length;
+  const ignorableCount = lastDuplicateResults.filter(r => r.cause === 'ignorable').length;
+  const otherCount = lastDuplicateResults.filter(r => r.cause === 'other').length;
+  const mixedCount = lastDuplicateResults.filter(r => r.cause === 'mixed').length;
+  divDupSummary.innerText =
+    `${lastDuplicateResults.length} cluster(s) found — ${mismatchCount} with delta mismatches, ` +
+    `${ignorableCount} ignorable, ${otherCount} other, ${mixedCount} mixed`;
+  btnDupAddToPattern.disabled = (lastDuplicateResults.length === 0);
+  updateDupFilterCount();
+}
+
+function filterDuplicateResults() {
+  if (!lastDuplicateResults) return [];
+  const cause = selDupCause.value; // 'all'|'ignorable'|'other'|'mixed'
+  const mismatchOnly = cbDupMismatchOnly.checked;
+  return lastDuplicateResults.filter(r => {
+    if (mismatchOnly && (r.mismatches.length === 0)) return false;
+    if ((cause !== 'all') && (r.cause !== cause)) return false;
+    return true;
+  });
+}
+
+function updateDupFilterCount() {
+  if (!lastDuplicateResults) {
+    divDupFilterCount.innerText = '';
+    return;
+  }
+  divDupFilterCount.innerText = `${filterDuplicateResults().length} cluster(s) match this filter`;
+}
+
+function doDupAddToPattern() {
+  const filtered = filterDuplicateResults();
+  const indices = [];
+  filtered.forEach(r => indices.push(...r.indices));
+  setPatternList(indices, cbDupMerge.checked);
+  dlgPatternOperations.close();
+}
+
 function doGetPatternBin(event, i) {
   // Copy from patternBins[i] to the pattern list...
   if (event.ctrlKey) inpPattern.value = '(multiple)';
@@ -2162,6 +2209,30 @@ function buildPatternBins() {
   <br/><button id='btnDownloadList'>Download to file</button>
   <h3>Pattern Bins</h3>
   <div id='divPatternBins'></div>
+  <h3>Duplicate Glyph Sequences</h3>
+  <button id='btnDupScan'>Scan Word List</button>
+  <div id='divDupSummary'><i>Not scanned yet</i></div>
+  <table border=0>
+    <tr>
+      <td>Cause:</td>
+      <td>
+        <select id='selDupCause'>
+          <option value='all'>All</option>
+          <option value='ignorable'>Ignorable (ZWJ/ZWNJ/etc)</option>
+          <option value='other'>Other</option>
+          <option value='mixed'>Mixed</option>
+        </select>
+      </td>
+    </tr>
+    <tr>
+      <td colspan=2><input type='checkbox' id='cbDupMismatchOnly' checked><label for='cbDupMismatchOnly'>Only clusters with delta mismatches</label></input></td>
+    </tr>
+    <tr>
+      <td colspan=2><input type='checkbox' id='cbDupMerge'><label for='cbDupMerge'>Merge into existing Pattern List (instead of replacing it)</label></input></td>
+    </tr>
+  </table>
+  <div id='divDupFilterCount'></div>
+  <button id='btnDupAddToPattern' disabled>Add Filtered to Pattern List</button>
 </dialog>
 
 <div id='divLOAD'>
@@ -2438,6 +2509,10 @@ patchEventClick(doPasteList, [btnPasteList]);
 patchEventClick(doPatternListCopy, [btnPatternListCopy]);
 patchEventClick(doPatternDialogShow, [btnPatternDialogShow]);
 
+patchEventClick(doDupScan, [btnDupScan]);
+patchEventClick(doDupAddToPattern, [btnDupAddToPattern]);
+patchEventInput(updateDupFilterCount, [selDupCause, cbDupMismatchOnly]);
+
 patchEventInput(inpIndexChanged, [inpIndex]);
 
 window.addEventListener('beforeunload', (e)=>{
@@ -2455,7 +2530,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-13 1600
+<br/>2026-08-20 0950
 </body>
 
 

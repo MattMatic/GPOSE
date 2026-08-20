@@ -94,6 +94,7 @@ class ProgressPanel {
 };
 
 let progressPanel = new ProgressPanel();
+window.progressPanel = progressPanel;
 
 
 window.document.write(`
