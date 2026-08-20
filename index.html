@@ -1650,8 +1650,7 @@ async function patternApply(event) {
     // Comine them
     const set = new Set(wordList.filtered.pattern);
     for (const v of edited) set.add(v);
-    const arr = Array.from(set).sort();
-    wordList.filtered.pattern = arr;
+    wordList.filtered.pattern = Array.from(set); // preserve insertion order
   } else {
     wordList.filtered.pattern = edited; //!!Nasty
   }
@@ -1984,7 +1983,7 @@ function setPatternList(list, merge) {
   if (!merge) wordList.filtered.pattern = [];
   const set = new Set(wordList.filtered.pattern);
   if (list) for (const v of list) set.add(v);
-  wordList.filtered.pattern = Array.from(set).sort();
+  wordList.filtered.pattern = Array.from(set); // preserve insertion order
   radClassPattern.disabled = wordList.filtered.pattern.length == 0;
 
   refreshSVG();
@@ -2003,7 +2002,7 @@ async function doDupScan() {
   const otherCount = lastDuplicateResults.filter(r => r.cause === 'other').length;
   const mixedCount = lastDuplicateResults.filter(r => r.cause === 'mixed').length;
   divDupSummary.innerText =
-    `${lastDuplicateResults.length} cluster(s) found — ${mismatchCount} with delta mismatches, ` +
+    `${lastDuplicateResults.length} cluster(s) found - ${mismatchCount} with delta mismatches, ` +
     `${ignorableCount} ignorable, ${otherCount} other, ${mixedCount} mixed`;
   btnDupAddToPattern.disabled = (lastDuplicateResults.length === 0);
   updateDupFilterCount();
@@ -2530,7 +2529,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-20 0950
+<br/>2026-08-20 1450
 </body>
 
 
