@@ -460,6 +460,30 @@ class WordList {
   }
   gotoNext(which, forwards, firstLast) {
     const patternList = this.filtered.pattern;
+
+    // Pattern list has a deliberate, curated order (not wordlist index order),
+    // so it steps through its own array positions rather than sweeping the
+    // wordlist and testing membership like the other filters below.
+    if (which === 'pattern') {
+      this.leavingCurrentEntry();
+      if (!patternList || (patternList.length === 0)) return undefined;
+      let pos;
+      if (firstLast) {
+        pos = forwards ? 0 : patternList.length - 1;
+      } else {
+        const curPos = patternList.indexOf(this.currentIndex);
+        if (curPos < 0) {
+          // Not currently on a pattern member - land on the nearest end.
+          pos = forwards ? 0 : patternList.length - 1;
+        } else {
+          pos = forwards ? curPos + 1 : curPos - 1;
+        }
+      }
+      if ((pos < 0) || (pos >= patternList.length)) return undefined;
+      this.currentIndex = patternList[pos];
+      return this.get(this.currentIndex);
+    }
+
     function checkEntry(we, index) {
       if (typeof which == 'number')
         return (which == we.getQuality());
@@ -468,8 +492,6 @@ class WordList {
       if (typeof which === 'string') {
         if (which === 'edited')
           return we.hasDelta();
-        if (which === 'pattern')
-          return patternList.indexOf(index)>=0;
         if (which === 'all')
           return true;
       }
