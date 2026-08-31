@@ -1634,6 +1634,7 @@ async function patternApply(event) {
     if (qAfter > qBefore) {
       // WORSE!
       we.restoreDelta(daSaved);
+      we.evaluate(wordList, evaluateOptions); // Re-sync ev/quality with the reverted delta
       unchanged++;
     } else {
       if (qAfter < qBefore)
@@ -2529,7 +2530,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-20 1450
+<br/>2026-08-31 1440
 </body>
 
 
