@@ -1194,6 +1194,7 @@ function patternMatchShow() {
   divPatternSvg.innerHTML = '';
   spanPatternWord.innerText = current.entry.getWord();
   spanPatternUnicode.innerText = divUnicode.innerText;
+  cbForceApply.checked = false;
   dlgPatternApply.showModal();
 }
 
@@ -1493,7 +1494,10 @@ function patternShowSvg(indexResult) {
       if (re.b.apply) {
         const gidx = re.b.index;
         const tidx = re.a.index;
-        const des = patternApplication.entry.delta[gidx];
+        const srcIdx = patternApplication.gidxToSourceIndex.has(gidx)
+          ? patternApplication.gidxToSourceIndex.get(gidx)
+          : gidx; // Fallback: pattern couldn't be matched against the source word itself
+        const des = patternApplication.entry.delta[srcIdx];
         if (typeof des.dx == 'number') we.updateDelta(tidx, 'dx', des.dx);
         if (typeof des.dy == 'number') we.updateDelta(tidx, 'dy', des.dy);
         if (typeof des.ax == 'number') we.updateDelta(tidx, 'ax', des.ax);
@@ -1552,6 +1556,19 @@ async function patternMatchFind() {
   const sa = getFilteredList().list;
 
   const ma = await patternMatchExtract(sa, searchText, minLength, maxGap);
+
+  // Pattern token positions (b.index) don't line up with this word's own
+  // delta array whenever the pattern is a gapped/partial subsequence of it
+  // (the normal case). Match the pattern against the source word itself to
+  // get the real gidx -> delta-index mapping, independent of the Source
+  // List filter (the current word may not be in `sa`).
+  const selfMatch = await patternMatchExtract([wordList.getCurrentIndex()], searchText, minLength, maxGap);
+  const gidxToSourceIndex = new Map();
+  if (selfMatch.length > 0) {
+    selfMatch[0].result.forEach(re => gidxToSourceIndex.set(re.b.index, re.a.index));
+  }
+  patternApplication.gidxToSourceIndex = gidxToSourceIndex;
+
   let max = ma.length;
   let html = '\t# Word \tInfo<br/>\r\n';
   await progressPanel.start(max, "Searching", true);
@@ -1613,6 +1630,7 @@ async function patternApply(event) {
   let changed = 0;
   let better = 0;
   let unchanged = 0;
+  const forceApply = cbForceApply.checked;
   await progressPanel.start(max, 'Apply', true);
   for (let i=0; i<max; i++) {
     const res = results[i];
@@ -1621,9 +1639,12 @@ async function patternApply(event) {
     const qBefore = we.getQuality();
     res.result.forEach(re=> {
       if (re.b.apply) {
-        const gidx = re.b.index; // Source
+        const gidx = re.b.index; // Source (pattern-token position)
         const tidx = re.a.index; // Target
-        const des = patternApplication.entry.delta[gidx];
+        const srcIdx = patternApplication.gidxToSourceIndex.has(gidx)
+          ? patternApplication.gidxToSourceIndex.get(gidx)
+          : gidx; // Fallback: pattern couldn't be matched against the source word itself
+        const des = patternApplication.entry.delta[srcIdx];
         if (typeof des.dx == 'number') we.updateDelta(tidx, 'dx', des.dx);
         if (typeof des.dy == 'number') we.updateDelta(tidx, 'dy', des.dy);
         if (typeof des.ax == 'number') we.updateDelta(tidx, 'ax', des.ax);
@@ -1631,7 +1652,7 @@ async function patternApply(event) {
     });
     we.evaluate(wordList, evaluateOptions);
     const qAfter = we.getQuality();
-    if (qAfter > qBefore) {
+    if (!forceApply && (qAfter > qBefore)) {
       // WORSE!
       we.restoreDelta(daSaved);
       we.evaluate(wordList, evaluateOptions); // Re-sync ev/quality with the reverted delta
@@ -2193,6 +2214,7 @@ function buildPatternBins() {
       <td valign="top"></td>
       <td>
         <button id='btnPatternApply' title='Hold Ctrl key to merge into pattern list' style='background-color:#f83; color:white;'>Apply Changes</button>
+        <input type='checkbox' id='cbForceApply'><label for='cbForceApply'>Force changes</label>
       </td>
       <td>
         <button id='btnPatternCopy'>Copy List</button>
@@ -2530,7 +2552,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-31 1440
+<br/>2026-08-31 1510
 </body>
 
 
