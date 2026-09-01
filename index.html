@@ -1295,10 +1295,13 @@ function splitInfoToGlyphs(txt) {
 // Compare pattern's delta values with the target
 function compareDeltaValue(a, b) {
   let match = true;
-  const bWasSet = (typeof b !== 'undefined');
+  let bWasSet = (typeof b !== 'undefined');
   // Fold `b` into a number...
   if (typeof b === 'undefined') b = 0;
-  if (typeof b === 'string') b = Number(b);
+  if (typeof b === 'string') {
+    if (b === '') bWasSet = false;
+    b = Number(b);
+  }
 
   if (typeof a === 'undefined') return true;
   if (typeof a === 'string') {
