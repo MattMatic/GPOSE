@@ -1292,25 +1292,42 @@ function splitInfoToGlyphs(txt) {
   return ic;
 }
 
+// Compare pattern's delta values with the target
 function compareDeltaValue(a, b) {
+  let match = true;
+  const bWasSet = (typeof b !== 'undefined');
+  // Fold `b` into a number...
+  if (typeof b === 'undefined') b = 0;
+  if (typeof b === 'string') b = Number(b);
+
   if (typeof a === 'undefined') return true;
   if (typeof a === 'string') {
-    if (typeof b === 'undefined') return false; // NOT set
+    if (a.startsWith('!')) {
+      // Invert result
+      match = false;
+      a = a.slice(1);
+    }
     if (a === '*') {
-      // Anything set
-      return true;
+      // Anything set (including an explicit 0 - distinct from unset)
+      return match === bWasSet;
     }
     if (a === '-') {
-      if (b < 0) return true;
+      return match === (b < 0);
     }
     if (a === '+') {
-      if (b > 0) return true;
+      return match === (b > 0);
+    }
+    const rangeMatch = a.match(/^(-?\d+)?\s*\.{2,3}\s*(-?\d+)?$/);
+    if (rangeMatch) {
+      const [, loStr, hiStr] = rangeMatch;
+      if (loStr === undefined && hiStr === undefined) return !match;
+      let lo, hi;
+      if (loStr === undefined) lo = -1e12; else lo = parseInt(loStr);
+      if (hiStr === undefined) hi =  1e12; else hi = parseInt(hiStr);
+      return match === ((b >= lo) && (b <= hi));
     }
   }
-  if (a === 0) {
-    if (typeof b === 'undefined') return true; // Allow zero as no delta
-  }
-  return (a === b);
+  return match === (a == b);
 }
 
 async function patternMatchExtract(sa, searchText, minLength, maxGap) {
@@ -2179,7 +2196,8 @@ function buildPatternBins() {
             <h3>Delta</h3>
             Use form `<span class="mono">GLYPH<font color='red'>&lt;ID:VAL,ID:VAL&gt;</font></span>`
             <br/> - where ID=dx,dy,ax,ay - to find delta values.
-            <br/> - where VAL is a value or `*` = anything, `+` = any positive, `-` = any negative. 
+            <br/> - where VAL is a value or `!` = NOT, `*` = anything, `+` = any positive, `-` = any negative. 
+            <br/> - where VAL can be a range `80..120` (inclusive), `..120` (up to 120 inclusive), `80..` (above 80 inclusive)
             <br/>e.g. `<span class="mono">ALIFf1&lt;dx:-60 ax:100&gt;</span>`
             <br/>e.g. `<span class="mono">sda&lt;dx:* dy:-&gt;</span>`
             
@@ -2552,7 +2570,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-08-31 1510
+<br/>2026-09-01 1030
 </body>
 
 
