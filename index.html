@@ -1293,8 +1293,35 @@ function splitInfoToGlyphs(txt) {
 }
 
 // Compare pattern's delta values with the target
-function compareDeltaValue(a, b) {
+function compareDeltaValue(a, deltaVal, hbVal, baseAbsolute) {
   let match = true;
+  let useAbsolute = false;
+  let useRelative = false;
+
+  if (typeof a === 'string') {
+    if (a.startsWith('!')) {
+      // Invert result
+      match = false;
+      a = a.slice(1);
+    }
+    if (a.startsWith('@')) {
+      // Compare against the absolute position (harfbuzz base + delta)
+      useAbsolute = true;
+      a = a.slice(1);
+    } else if (a.startsWith('b')) {
+      // Compare against the absolute position relative to the mark's base glyph
+      // (0 for a non-mark glyph, so this then behaves like `@`)
+      useRelative = true;
+      a = a.slice(1);
+    }
+  }
+
+  let b = deltaVal;
+  if (useAbsolute) {
+    b = (Number(deltaVal) || 0) + (Number(hbVal) || 0);
+  } else if (useRelative) {
+    b = ((Number(deltaVal) || 0) + (Number(hbVal) || 0)) - (Number(baseAbsolute) || 0);
+  }
   let bWasSet = (typeof b !== 'undefined');
   // Fold `b` into a number...
   if (typeof b === 'undefined') b = 0;
@@ -1305,11 +1332,6 @@ function compareDeltaValue(a, b) {
 
   if (typeof a === 'undefined') return true;
   if (typeof a === 'string') {
-    if (a.startsWith('!')) {
-      // Invert result
-      match = false;
-      a = a.slice(1);
-    }
     if (a === '*') {
       // Anything set (including an explicit 0 - distinct from unset)
       return match === bWasSet;
@@ -1345,6 +1367,15 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
     }
     return sarr;
   }
+  // For a mark glyph at `index`, returns the glyph index of the base it's attached to
+  // (undefined if `index` isn't the mark side of an attachment pair).
+  function findMarkBaseIndex(index) {
+    const marks = we.hb && we.hb.attachments && we.hb.attachments.marks;
+    if (!marks) return undefined;
+    const pair = marks.find(index);
+    if (!pair || pair[0] !== index) return undefined;
+    return pair[1];
+  }
   function areGlyphsEqual(a, b) {
     const ga = a.glyph;
     const gb = b.glyph;
@@ -1359,11 +1390,18 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
     // Check for deltas...
     if (!b.delta) return true;
     const hbd = we.delta[a.index];
-    if (!compareDeltaValue(b.delta.dx, hbd.dx)) return false;
-    if (!compareDeltaValue(b.delta.dy, hbd.dy)) return false;
-    if (!compareDeltaValue(b.delta.ax, hbd.ax)) return false;
-    if (!compareDeltaValue(b.delta.ay, hbd.ay)) return false;
-    return true;  
+    const hbe = we.hb[a.index];
+    const baseIdx = findMarkBaseIndex(a.index);
+    const baseHbd = (baseIdx !== undefined) ? we.delta[baseIdx] : undefined;
+    const baseHbe = (baseIdx !== undefined) ? we.hb[baseIdx] : undefined;
+    // Base's absolute position per field; 0 (i.e. no offset) when this glyph isn't a mark
+    const baseAbs = (id) => (baseIdx === undefined) ? 0 :
+      (Number(baseHbd && baseHbd[id]) || 0) + (Number(baseHbe && baseHbe[id]) || 0);
+    if (!compareDeltaValue(b.delta.dx, hbd.dx, hbe.dx, baseAbs('dx'))) return false;
+    if (!compareDeltaValue(b.delta.dy, hbd.dy, hbe.dy, baseAbs('dy'))) return false;
+    if (!compareDeltaValue(b.delta.ax, hbd.ax, hbe.ax, baseAbs('ax'))) return false;
+    if (!compareDeltaValue(b.delta.ay, hbd.ay, hbe.ay, baseAbs('ay'))) return false;
+    return true;
   }
 
   const sarr = buildPatternSourceArray(searchText);
@@ -2199,10 +2237,14 @@ function buildPatternBins() {
             <h3>Delta</h3>
             Use form `<span class="mono">GLYPH<font color='red'>&lt;ID:VAL,ID:VAL&gt;</font></span>`
             <br/> - where ID=dx,dy,ax,ay - to find delta values.
-            <br/> - where VAL is a value or `!` = NOT, `*` = anything, `+` = any positive, `-` = any negative. 
+            <br/> - where VAL is a value or `!` = NOT, `*` = anything, `+` = any positive, `-` = any negative.
             <br/> - where VAL can be a range `80..120` (inclusive), `..120` (up to 120 inclusive), `80..` (above 80 inclusive)
+            <br/> - VAL can be prefixed with `<font color='red'>@</font>` to compare the absolute position (harfbuzz base + delta) instead of just the delta.
+            <br/> - VAL can be prefixed with `<font color='red'>b</font>` to compare the absolute position relative to a mark's base glyph (0 if not a mark, so behaves like `@`).
             <br/>e.g. `<span class="mono">ALIFf1&lt;dx:-60 ax:100&gt;</span>`
             <br/>e.g. `<span class="mono">sda&lt;dx:* dy:-&gt;</span>`
+            <br/>e.g. `<span class="mono">sda&lt;dy:@..-250&gt;</span>` - absolute dy less than -250
+            <br/>e.g. `<span class="mono">sda&lt;dy:b0..&gt;</span>` - mark sits at or above its base's dy
             
             <h3>RegExp</h3>            
             Use `<span class="mono"><font color='red'>/</font>...<font color='red'>/</font></span>` for regular expressions.
@@ -2573,7 +2615,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-09-01 1030
+<br/>2026-09-03 1635
 </body>
 
 
