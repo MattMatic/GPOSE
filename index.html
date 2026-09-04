@@ -1293,10 +1293,11 @@ function splitInfoToGlyphs(txt) {
 }
 
 // Compare pattern's delta values with the target
-function compareDeltaValue(a, deltaVal, hbVal, baseAbsolute) {
+function compareDeltaValue(a, deltaVal, hbVal, baseAbsolute, gapValue) {
   let match = true;
   let useAbsolute = false;
   let useRelative = false;
+  let useGap = false;
 
   if (typeof a === 'string') {
     if (a.startsWith('!')) {
@@ -1313,6 +1314,13 @@ function compareDeltaValue(a, deltaVal, hbVal, baseAbsolute) {
       // (0 for a non-mark glyph, so this then behaves like `@`)
       useRelative = true;
       a = a.slice(1);
+    } else if (a.startsWith('g')) {
+      // Compare against the separation between the mark's and its base glyph's
+      // bounding boxes along this field's axis (0 when they overlap/touch,
+      // positive when the mark sits beyond the base's max edge, negative when
+      // it sits before the base's min edge; 0 for a non-mark glyph)
+      useGap = true;
+      a = a.slice(1);
     }
   }
 
@@ -1321,6 +1329,8 @@ function compareDeltaValue(a, deltaVal, hbVal, baseAbsolute) {
     b = (Number(deltaVal) || 0) + (Number(hbVal) || 0);
   } else if (useRelative) {
     b = ((Number(deltaVal) || 0) + (Number(hbVal) || 0)) - (Number(baseAbsolute) || 0);
+  } else if (useGap) {
+    b = gapValue;
   }
   let bWasSet = (typeof b !== 'undefined');
   // Fold `b` into a number...
@@ -1397,10 +1407,43 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
     // Base's absolute position per field; 0 (i.e. no offset) when this glyph isn't a mark
     const baseAbs = (id) => (baseIdx === undefined) ? 0 :
       (Number(baseHbd && baseHbd[id]) || 0) + (Number(baseHbe && baseHbe[id]) || 0);
-    if (!compareDeltaValue(b.delta.dx, hbd.dx, hbe.dx, baseAbs('dx'))) return false;
-    if (!compareDeltaValue(b.delta.dy, hbd.dy, hbe.dy, baseAbs('dy'))) return false;
-    if (!compareDeltaValue(b.delta.ax, hbd.ax, hbe.ax, baseAbs('ax'))) return false;
-    if (!compareDeltaValue(b.delta.ay, hbd.ay, hbe.ay, baseAbs('ay'))) return false;
+
+    // Bounding box (design units, unplaced) for a glyph id; undefined if it has no outline
+    function glyphBBox(gid) {
+      if (typeof gid !== 'number') return undefined;
+      const cp = hbg.getField(gid).getField();
+      if (!cp || Number.isNaN(cp.bbox.x.min) || Number.isNaN(cp.bbox.y.min)) return undefined;
+      return cp.bbox;
+    }
+    // Separation between the mark's (a) and its base's bounding boxes along `axis` ('x'|'y'):
+    // 0 when they overlap, positive when the mark is entirely beyond the base's max edge,
+    // negative when it's entirely before the base's min edge. Undefined if either glyph has no outline.
+    function bboxGap(axis) {
+      const dField = (axis === 'x') ? 'dx' : 'dy';
+      const markBB = glyphBBox(hbe.g);
+      if (!markBB) return undefined;
+      const baseBB = (baseIdx === undefined) ? {x:{min:0,max:0}, y:{min:0,max:0}} : glyphBBox(baseHbe && baseHbe.g);
+      if (!baseBB) return undefined;
+      const markPlace = (Number(hbd[dField]) || 0) + (Number(hbe[dField]) || 0);
+      const basePlace = (baseIdx === undefined) ? 0 :
+        (Number(baseHbd && baseHbd[dField]) || 0) + (Number(baseHbe && baseHbe[dField]) || 0);
+      const mMin = markBB[axis].min + markPlace, mMax = markBB[axis].max + markPlace;
+      const bMin = baseBB[axis].min + basePlace, bMax = baseBB[axis].max + basePlace;
+      if (mMin > bMax) return mMin - bMax;
+      if (mMax < bMin) return mMax - bMin;
+      return 0;
+    }
+    // Only compute the (moderately expensive) bbox gap when the pattern actually asks for it
+    function needsGap(v) {
+      return (typeof v === 'string') && v.replace(/^!/, '').startsWith('g');
+    }
+    const gapX = needsGap(b.delta.dx) || needsGap(b.delta.ax) ? bboxGap('x') : undefined;
+    const gapY = needsGap(b.delta.dy) || needsGap(b.delta.ay) ? bboxGap('y') : undefined;
+
+    if (!compareDeltaValue(b.delta.dx, hbd.dx, hbe.dx, baseAbs('dx'), gapX)) return false;
+    if (!compareDeltaValue(b.delta.dy, hbd.dy, hbe.dy, baseAbs('dy'), gapY)) return false;
+    if (!compareDeltaValue(b.delta.ax, hbd.ax, hbe.ax, baseAbs('ax'), gapX)) return false;
+    if (!compareDeltaValue(b.delta.ay, hbd.ay, hbe.ay, baseAbs('ay'), gapY)) return false;
     return true;
   }
 
@@ -2241,10 +2284,12 @@ function buildPatternBins() {
             <br/> - where VAL can be a range `80..120` (inclusive), `..120` (up to 120 inclusive), `80..` (above 80 inclusive)
             <br/> - VAL can be prefixed with `<font color='red'>@</font>` to compare the absolute position (harfbuzz base + delta) instead of just the delta.
             <br/> - VAL can be prefixed with `<font color='red'>b</font>` to compare the absolute position relative to a mark's base glyph (0 if not a mark, so behaves like `@`).
+            <br/> - VAL can be prefixed with `<font color='red'>g</font>` to compare the gap between the mark's and its base's bounding boxes on that axis (0 if they overlap, positive if the mark is beyond the base's edge, negative if before it; 0 if not a mark).
             <br/>e.g. `<span class="mono">ALIFf1&lt;dx:-60 ax:100&gt;</span>`
             <br/>e.g. `<span class="mono">sda&lt;dx:* dy:-&gt;</span>`
             <br/>e.g. `<span class="mono">sda&lt;dy:@..-250&gt;</span>` - absolute dy less than -250
             <br/>e.g. `<span class="mono">sda&lt;dy:b0..&gt;</span>` - mark sits at or above its base's dy
+            <br/>e.g. `<span class="mono">sda&lt;dy:g50..&gt;</span>` - mark's bbox sits 50+ units above its base's bbox
             
             <h3>RegExp</h3>            
             Use `<span class="mono"><font color='red'>/</font>...<font color='red'>/</font></span>` for regular expressions.
@@ -2615,7 +2660,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-09-03 1635
+<br/>2026-09-04 1150
 </body>
 
 
