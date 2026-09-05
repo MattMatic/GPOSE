@@ -915,11 +915,17 @@ async function createFontInfoObject() {
 
 async function saveHarfBuzzData(options={}) {
   const {
-    saveTxt=false, 
-    saveJson=true, 
+    saveTxt=false,
+    saveJson=true,
     saveJson5=false,
     saveFontInfo=true,
+    wordIndices=undefined, // subset of word indices to export; default = every word
+    emptyDelta=false,      // write an empty data/delta.json instead of the real one
+                            // (required when wordIndices is a subset - a delta entry for a
+                            // word absent from this ZIP's harfbuzz.json crashes gpos-miner's reader)
+    fileNameHint='gpose',
   } = options;
+  const indices = wordIndices ?? Array.from({length: wordList.length()}, (_,i)=>i);
   const zip = new JSZip();
   const RTL = String.fromCodePoint(0x2190);
   let txt = '';
@@ -943,12 +949,12 @@ async function saveHarfBuzzData(options={}) {
     return txt;
   }
 
-  const max = wordList.length();
+  const max = indices.length;
 
   if (saveTxt) {
     await progressPanel.start(max, 'HarfBuzz Text');
     for (let i=0; i<max; i++) {
-      const entry = wordList.getEntry(i);
+      const entry = wordList.getEntry(indices[i]);
       txt += `${entry.w}\t`;
       txt += entryToHbTxt(entry);
       txt += `\n`;
@@ -970,12 +976,12 @@ async function saveHarfBuzzData(options={}) {
     };
     hbJson.words = {
       file: wordListFile.filename,
-      count: wordList.length(),
+      count: max,
     };
     hbJson.data = [];
     await progressPanel.start(max, 'HarfBuzz JSON');
     for (let i=0; i<max; i++) {
-      const entry = wordList.getEntry(i);
+      const entry = wordList.getEntry(indices[i]);
       hbJson.data[i] = {
         w: entry.w,
         d: entryToHbTxt(entry),
@@ -1006,27 +1012,28 @@ async function saveHarfBuzzData(options={}) {
 
   // Add the delta file
   await progressPanel.start(3, 'ZIP');
-  zip.file('data/delta.json', createDeltaJson(false));
+  zip.file('data/delta.json', emptyDelta ? JSON.stringify({delta:[]}, null, 1) : createDeltaJson(false));
   await progressPanel.setProgress(1);
 
   const zipBlob = await zip.generateAsync({
-            type: 'blob', 
+            type: 'blob',
             compression: 'DEFLATE',
             compressionOptions: {
               level: 5,
             }
           });
   await progressPanel.setProgress(2);
-  saveAs(zipBlob, `gpos-editor.${DateTimeForFilename()}.gpose.zip`);
+  saveAs(zipBlob, `gpos-editor.${DateTimeForFilename()}.${fileNameHint}.zip`);
   await progressPanel.done();
 }
 
 async function loadDeltaFileProcess(txt, showAlert=true) {
   const gpose = JSON5.parse(txt);
-  //res = wordList.applyDeltaArrayFromLoad(gpose.delta);
   const max = gpose.delta.length;
   const removed = [];
-  const options = {addNewWords:cbAppend.checked};
+  const skipped = [];
+  const options = {addNewWords:cbAppend.checked, onlyIfEmpty:cbOnlyEmpty.checked};
+  let foundCount = 0, unfoundCount = 0;
   await progressPanel.start(max, 'Apply', true);
 
   const pool = await getShapePool();
@@ -1039,6 +1046,7 @@ async function loadDeltaFileProcess(txt, showAlert=true) {
       let wse = wordList.findWord(de.w);
       let needsShape = false;
       if (!wse) {
+        unfoundCount++;
         if (options.addNewWords) {
           wordList.addWord(de.w);
           wse = wordList.findWord(de.w);
@@ -1048,9 +1056,15 @@ async function loadDeltaFileProcess(txt, showAlert=true) {
           removed.push(de.w);
           wse = null;
         }
-      } else if (de.dir && (de.dir !== wse.getDirection())) {
-        wse.setDirection(de.dir);
-        needsShape = true;
+      } else if (options.onlyIfEmpty && wse.hasDelta()) {
+        skipped.push(de.w);
+        wse = null;
+      } else {
+        foundCount++;
+        if (de.dir && (de.dir !== wse.getDirection())) {
+          wse.setDirection(de.dir);
+          needsShape = true;
+        }
       }
       if (wse) {
         refToEntry.set(i, wse);
@@ -1085,20 +1099,33 @@ async function loadDeltaFileProcess(txt, showAlert=true) {
     }
     progressPanel.setProgress(max);
   } else {
+    wordList._found = 0;
+    wordList._unfound = 0;
+    wordList._skipped = 0;
     for (let i=0; i<max; i++) {
       const de = gpose.delta[i];
+      const skippedBefore = wordList._skipped;
       if (!wordList.applyDeltaArrayEntry(de, options)) {
-        removed.push(de.w);
+        if (wordList._skipped > skippedBefore) {
+          skipped.push(de.w);
+        } else {
+          removed.push(de.w);
+        }
       }
       await progressPanel.setProgress(i);
       if (progressPanel.aborted()) break;
     }
+    foundCount = wordList._found;
+    unfoundCount = wordList._unfound;
   }
   await progressPanel.done();
   if (showAlert) {
-    window.alert(`Processed ${res.found}. ${res.unfound} new`);
+    let msg = `Processed ${foundCount}. ${unfoundCount} new`;
+    if (skipped.length > 0) msg += `. ${skipped.length} skipped (already had a delta)`;
+    window.alert(msg);
   }
   window._deltaRemoved = removed;
+  window._deltaSkipped = skipped;
   wordList.buildDeltaChoices();
   refreshSVG(null, null, true);
   showTrafficLights();
@@ -1288,6 +1315,10 @@ function splitInfoToGlyphs(txt) {
         locEnd   : (m[1].includes('$')),
       })
     }
+    // `←` means the pattern was typed in lexical/logical order; `we.hb` is
+    // always stored in HarfBuzz's final LTR visual order, so flip the token
+    // order here to line the two up before matching.
+    if (ic.rtl) ic.reverse();
   }
   return ic;
 }
@@ -2114,6 +2145,55 @@ function setPatternList(list, merge) {
   showStatistics();
 }
 
+// Populate (or merge into, with Ctrl) the pattern list with every word from the selected
+// Source List (see dlgPatternApply) that has no delta applied, and is at least as bad as
+// the selected quality threshold (e.g. 'Kerning' includes Kerning/Near/Collision)
+function doFindZeroDeltaWords(event) {
+  // Minimum FORCEFIELD_QUALITY a word must have to pass the filter. Built lazily here (rather
+  // than as a module-load-time constant) since FORCEFIELD_QUALITY comes from an async module
+  // (index.html:164) that isn't guaranteed to have run yet at this script's top-level.
+  const qualityThreshold = {
+    all:      -1, // no floor - everything passes, including OK
+    maybe:    FORCEFIELD_QUALITY.MAYBE,
+    kern:     FORCEFIELD_QUALITY.KERNING,
+    near:     FORCEFIELD_QUALITY.COLLISION_NEAR,
+    collision:FORCEFIELD_QUALITY.COLLISION_GLYPH,
+  };
+  const minQuality = qualityThreshold[selZeroDeltaQuality.value] ?? -1;
+  const sourceList = getFilteredList().list;
+  const indices = [];
+  for (const idx of sourceList) {
+    const we = wordList.get(idx);
+    if (we.hasDelta()) continue;
+    if ((we.getQuality() ?? FORCEFIELD_QUALITY.OK) < minQuality) continue;
+    indices.push(idx);
+  }
+  setPatternList(indices, event.ctrlKey);
+  dlgPatternApply.close();
+  showStatistics();
+}
+
+// Export the current Pattern List as a ZIP the GPOS Pattern Miner can read directly:
+// fontinfo.json + harfbuzz.json for just these words, with an empty delta.json (these
+// words have no meaningful delta yet - that's what the miner's "apply rules" mode produces).
+async function doDownloadPatternListForMining() {
+  const indices = getPatternList();
+  if (!indices || indices.length === 0) {
+    window.alert('Pattern List is empty');
+    return;
+  }
+  await saveHarfBuzzData({
+    saveTxt: false,
+    saveJson: true,
+    saveJson5: false,
+    saveFontInfo: true,
+    wordIndices: indices,
+    emptyDelta: true,
+    fileNameHint: 'wordlist',
+  });
+  dlgPatternOperations.close();
+}
+
 let lastDuplicateResults = null;
 
 async function doDupScan() {
@@ -2255,6 +2335,21 @@ function buildPatternBins() {
       </td>
     </tr>
     <tr>
+      <td></td>
+      <td colspan=2>
+        <button id='btnFindZeroDelta' title='Hold Ctrl key to merge into pattern list'>Find Zero-Delta Words</button>
+        <label for='selZeroDeltaQuality'>at least:</label>
+        <select id='selZeroDeltaQuality'>
+          <option value='all'>All</option>
+          <option value='maybe' selected>Maybe</option>
+          <option value='kern'>Kerning</option>
+          <option value='near'>Near</option>
+          <option value='collision'>Collision</option>
+        </select>
+        <i>(searches the Source List above; results go to the Pattern List)</i>
+      </td>
+    </tr>
+    <tr>
       <td valign="top">Word:</td>
       <td><span id="spanPatternWord">&nbsp;</span></td>
       <td><span id="spanPatternUnicode">&nbsp;</span></td>
@@ -2337,6 +2432,7 @@ function buildPatternBins() {
   <button id='btnPasteList' title='Hold Ctrl key to merge into pattern list'>Paste from Clipboard</button>
   <br/><button id='btnPatternListCopy'>Copy to Clipboard</button>
   <br/><button id='btnDownloadList'>Download to file</button>
+  <br/><button id='btnDownloadPatternListForMining' title='ZIP for the GPOS Pattern Miner: fontinfo.json + harfbuzz.json for these words, no deltas'>Download for GPOS Pattern Miner</button>
   <h3>Pattern Bins</h3>
   <div id='divPatternBins'></div>
   <h3>Duplicate Glyph Sequences</h3>
@@ -2401,6 +2497,7 @@ function buildPatternBins() {
       <td id='ddJSONFile'>
         Drag .GPOSE file
         <br/><input type='checkbox' id='cbAppend'><label for='cbAppend'>Append New Words</label></input>
+        <br/><input type='checkbox' id='cbOnlyEmpty'><label for='cbOnlyEmpty'>Only Apply to Words With No Delta</label></input>
       </td>
       <td><span id='ddGPOSEFileName'></span></td>
       <td><span id='ddGPOSEFileResult'></span></td>
@@ -2601,6 +2698,7 @@ patchEventClick(gotoPrev,  [btnPrev]);
 patchEventClick(gotoNext,  [btnNext]);
 patchEventClick(gotoLast,  [btnLast]);
 patchEventClick(patternMatchFind, [btnPatternMatch]);
+patchEventClick(doFindZeroDeltaWords, [btnFindZeroDelta]);
 shortcutAddButton(btnPatternMatch, 'Alt+F', patternMatchFind);
 
 patchEventInput(updateClassChoice, [radClassAll, radClassCollision, radClassNear, radClassKerning, radClassMaybe, radClassPattern, radClassEdited]);
@@ -2637,6 +2735,7 @@ patchEventClick(processWordsInitial, [btnProcessWords]);
 patchEventClick(doDownloadList, [btnDownloadList]);
 patchEventClick(doPasteList, [btnPasteList]);
 patchEventClick(doPatternListCopy, [btnPatternListCopy]);
+patchEventClick(doDownloadPatternListForMining, [btnDownloadPatternListForMining]);
 patchEventClick(doPatternDialogShow, [btnPatternDialogShow]);
 
 patchEventClick(doDupScan, [btnDupScan]);
@@ -2660,7 +2759,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-09-04 1150
+<br/>2026-09-05 1430
 </body>
 
 
