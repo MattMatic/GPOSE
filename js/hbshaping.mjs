@@ -144,6 +144,7 @@ class HarfBuzzShaping {
     delete(this.otLayout);
     delete(this.otFont);
     this.cacheGlyphData = new Map();
+    delete(this._nameToGid);
   }
   setScriptLanguage(script, language) {
     this.script = script;
@@ -446,6 +447,20 @@ class HarfBuzzShaping {
   getGlyphName(gid) {
     const data = this._getGlyphData(gid);
     return data.name;
+  }
+  /*
+   * Reverse of getGlyphName() - built lazily on first call and cached
+   * alongside cacheGlyphData, so it's invalidated the same way (freeFont()).
+   */
+  getGlyphIdByName(name) {
+    if (!this._nameToGid) {
+      this._nameToGid = new Map();
+      const max = this.getGlyphCount();
+      for (let gid=0; gid<max; gid++) {
+        this._nameToGid.set(this.getGlyphName(gid), gid);
+      }
+    }
+    return this._nameToGid.get(name);
   }
   getGlyphUnicodes(gid) {
     const data = this._getGlyphData(gid);

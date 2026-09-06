@@ -168,9 +168,12 @@ import { HarfBuzzShaping, jsonToSvg, CursivesSets, MarksSets } from './js/hbshap
 import { CPaths64, HarfBuzzGlyphs, Clipper2Z, clipperGC } from './js/hbclipper.mjs';
 import { FontForceField, FORCEFIELD_QUALITY } from './js/fontforcefield.mjs';
 import { lcsWithGapConstraints } from './js/lcsgap.mjs';
-import { WordListEntry, WordList } from './js/wordlist.mjs';
+import { WordListEntry, WordList, DEFAULT_IGNORABLE_CODEPOINTS } from './js/wordlist.mjs';
 import { ShapePool } from './js/workerpool.mjs';
 import { findDuplicateClusters, printDuplicateClusters } from './js/findduplicates.mjs';
+import { checkRulesFormat } from './js/rules-format.mjs';
+import { resolveRules } from './js/rules-loader.mjs';
+import { buildRulesByGID, applyPatternsToWord } from './js/rule-dispatch.mjs';
 import JSON5 from './js/json5.index.min.mjs';
 //import { BSON, EJSON } from './js/bson.mjs';
 
@@ -250,6 +253,11 @@ window.fff = fff;
 window.FORCEFIELD_QUALITY = FORCEFIELD_QUALITY;
 window.clipperGC = clipperGC;
 window.JSON5 = JSON5;
+window.DEFAULT_IGNORABLE_CODEPOINTS = DEFAULT_IGNORABLE_CODEPOINTS;
+window.checkRulesFormat = checkRulesFormat;
+window.resolveRules = resolveRules;
+window.buildRulesByGID = buildRulesByGID;
+window.applyPatternsToWord = applyPatternsToWord;
 //window.BSON = BSON;
 //window.EJSON = EJSON;
 window.lcsWithGapConstraints = lcsWithGapConstraints;
@@ -1291,7 +1299,7 @@ function splitOutsideAngles(str) {
 
 function splitInfoToGlyphs(txt) {
   const ic = [];
-  ic.rtl = txt.startsWith('←');
+  ic.rtl = txt.startsWith(String.fromCodePoint(0x2190)); // '←' - see saveHarfBuzzData's RTL const for why this isn't a literal
   if (ic.rtl) txt = txt.slice(1).trim();
   if (txt) {
     //const arr = txt.split(' ').filter(s=>s.trim() !== '');
@@ -2194,6 +2202,159 @@ async function doDownloadPatternListForMining() {
   dlgPatternOperations.close();
 }
 
+// ── Apply Mined Rules ─────────────────────────────────────────────────────────
+// Consumes a "gpos-miner-rules" JSON (from the GPOS Pattern Miner's "Mined rules
+// JSON" download) and applies it directly to the current Pattern List's words,
+// in-memory - no ZIP/.gpose round-trip needed, since GPOSE already has the
+// shaped glyph sequence (we.hb) for every word live.
+let loadedRules = null; // { doc, patterns, warnings } - patterns are GID-resolved for the CURRENT font
+
+function doLoadRulesFile() {
+  chooseFile(doLoadRulesFileLoad);
+}
+
+async function doLoadRulesFileLoad(file) {
+  if (!file) return;
+  const txt = await file.text();
+  let doc;
+  try {
+    doc = JSON.parse(txt);
+    checkRulesFormat(doc);
+  } catch (err) {
+    window.alert(`Could not load rules file: ${err.message}`);
+    return;
+  }
+  let resolved;
+  try {
+    resolved = resolveRules(doc, (name) => hbs.getGlyphIdByName(name));
+  } catch (err) {
+    window.alert(`Could not resolve rules against this font: ${err.message}`);
+    return;
+  }
+  loadedRules = { doc, patterns: resolved.patterns, warnings: resolved.warnings };
+  renderRulesInfo();
+}
+
+function renderRulesInfo() {
+  if (!loadedRules) {
+    divRulesInfo.innerHTML = '<i>No rules file loaded</i>';
+    btnApplyRulesToPatternList.disabled = true;
+    return;
+  }
+  const src = loadedRules.doc.source || {};
+  const curName = hbs.getFontFullName();
+  const curVer  = hbs.getFontVersion();
+  const nameMatch = !src.fontFullName || (src.fontFullName === curName);
+  const verMatch  = !src.fontVersion  || (src.fontVersion  === curVer);
+
+  let html = `${loadedRules.patterns.length} rule(s) resolved`;
+  html += `<br/>Rules mined from: <b>${src.fontFullName ?? '(unknown)'}</b> v${src.fontVersion ?? '?'}`;
+  html += `<br/>Current font: <b>${curName ?? '(unknown)'}</b> v${curVer ?? '?'}`;
+  if (!nameMatch || !verMatch) {
+    html += `<br/><font color='red'>&#9888; Font ${!nameMatch ? 'name' : 'version'} differs from the rules file's source - deltas may not be meaningful.</font>`;
+  }
+  for (const w of loadedRules.warnings) {
+    html += `<br/><font color='#c80'>&#9888; ${w}</font>`;
+  }
+  divRulesInfo.innerHTML = html;
+  btnApplyRulesToPatternList.disabled = false;
+}
+
+// GIDs of Default_Ignorable glyphs in the CURRENT font - HarfBuzz skips these
+// transparently when matching GPOS ChainContextPos rules, and the mined rules'
+// context sequences were built against sequences with them already stripped
+// (see gpos-miner's data/harfbuzz-index.mjs), so dispatch here must match.
+function getIgnorableGidsForCurrentFont() {
+  const gids = new Set();
+  const max = hbs.getGlyphCount();
+  for (let gid=0; gid<max; gid++) {
+    const unicodes = hbs.getGlyphUnicodes(gid) || [];
+    if (unicodes.some(cp => DEFAULT_IGNORABLE_CODEPOINTS.has(cp))) gids.add(gid);
+  }
+  return gids;
+}
+
+// Build the glyph-id sequence to run rule dispatch against, plus a map back to
+// we.hb's own native index for each position in that sequence. Two things need
+// inverting relative to we.hb's own order, both because the rules were mined
+// via GPOSE's exported harfbuzz.json, not against we.hb directly:
+//   1. Default_Ignorable glyphs are stripped (see getIgnorableGidsForCurrentFont).
+//   2. For RTL words, the exported/mined glyph order is mirrored relative to
+//      we.hb's own order - saveHarfBuzzData()'s entryToHbTxt() writes we.hb in
+//      forward order, but the GPOS Pattern Miner's zip-reader.mjs (decodeHB())
+//      rebuilds it by unshifting each entry, mirroring it. Walking we.hb back
+//      to front for RTL words here reproduces that same order directly, with
+//      no separate un-mirror step needed afterward.
+// Uses gP (the GPOS-phase glyph id) over g when available, matching
+// saveHarfBuzzData()'s own entryToHbTxt() convention - the two can differ for
+// certain mark/ligature-component glyphs, and the rules were mined against gP.
+function buildDispatchHbAndResolver(we, ignorableGids) {
+  const hb = we.hb;
+  const maxGlyphs = hb.length;
+  const rtl = !!hb.rtl;
+  const dispatchHb = [];
+  const toNativeIdx = [];
+  for (let pass=0; pass<maxGlyphs; pass++) {
+    const nativeIdx = rtl ? (maxGlyphs - 1 - pass) : pass;
+    const ge = hb[nativeIdx];
+    const gid = (typeof ge.gP === 'number') ? ge.gP : ge.g;
+    if (ignorableGids.has(gid)) continue;
+    dispatchHb.push({ g: gid });
+    toNativeIdx.push(nativeIdx);
+  }
+  return { dispatchHb, toNativeIdx };
+}
+
+function doApplyRulesToPatternList() {
+  if (!loadedRules) return;
+  const list = getPatternList();
+  if (!list || list.length === 0) {
+    window.alert('Pattern List is empty');
+    return;
+  }
+  const onlyEmpty = radApplyOnlyEmpty.checked;
+  const rulesByGID = buildRulesByGID(loadedRules.patterns);
+  const ignorableGids = getIgnorableGidsForCurrentFont();
+
+  let wordsTouched = 0, wordsSkipped = 0, glyphsTouched = 0;
+  for (const idx of list) {
+    const we = wordList.get(idx);
+    if (onlyEmpty && we.hasDelta()) { wordsSkipped++; continue; }
+
+    // Track whether anything actually changed for this word, so it gets re-evaluated
+    // (and counted) even if replace mode clears a delta but no rule ends up matching -
+    // that clear is itself a real change and we.ev must not be left reflecting the old one.
+    let wordChanged = false;
+    if (!onlyEmpty && we.hasDelta()) {
+      we.clearDelta();
+      wordChanged = true;
+    }
+
+    const { dispatchHb, toNativeIdx } = buildDispatchHbAndResolver(we, ignorableGids);
+    const vrs = applyPatternsToWord(dispatchHb, rulesByGID);
+
+    for (const [dispatchIdx, corr] of vrs) {
+      const nativeIdx = toNativeIdx[dispatchIdx];
+      let touchedThisGlyph = false;
+      // ay is dropped - GPOSE's own delta model/save-load round-trip doesn't persist it either
+      if (corr.dx) { we.updateDelta(nativeIdx, 'dx', corr.dx); touchedThisGlyph = true; }
+      if (corr.dy) { we.updateDelta(nativeIdx, 'dy', corr.dy); touchedThisGlyph = true; }
+      if (corr.ax) { we.updateDelta(nativeIdx, 'ax', corr.ax); touchedThisGlyph = true; }
+      if (touchedThisGlyph) { glyphsTouched++; wordChanged = true; }
+    }
+    if (wordChanged) {
+      we.evaluate(wordList, evaluateOptions);
+      wordsTouched++;
+    }
+  }
+
+  wordList.buildDeltaChoices();
+  refreshSVG(null, null, true);
+  showTrafficLights();
+  showStatistics();
+  divApplyRulesResult.innerText = `Applied to ${wordsTouched} word(s), ${glyphsTouched} glyph(s) adjusted. ${wordsSkipped} word(s) skipped (already had a delta).`;
+}
+
 let lastDuplicateResults = null;
 
 async function doDupScan() {
@@ -2433,6 +2594,21 @@ function buildPatternBins() {
   <br/><button id='btnPatternListCopy'>Copy to Clipboard</button>
   <br/><button id='btnDownloadList'>Download to file</button>
   <br/><button id='btnDownloadPatternListForMining' title='ZIP for the GPOS Pattern Miner: fontinfo.json + harfbuzz.json for these words, no deltas'>Download for GPOS Pattern Miner</button>
+
+  <h3>Apply Mined Rules</h3>
+  <button id='btnLoadRulesFile'>Load Rules JSON&hellip;</button>
+  <div id='divRulesInfo' style='font-size:11px;margin-top:4px;'><i>No rules file loaded</i></div>
+  <table border=0>
+    <tr>
+      <td colspan=2><input type='radio' name='radApplyMode' id='radApplyOnlyEmpty' value='onlyEmpty' checked><label for='radApplyOnlyEmpty'>Only apply to words with no delta</label></td>
+    </tr>
+    <tr>
+      <td colspan=2><input type='radio' name='radApplyMode' id='radApplyReplace' value='replace'><label for='radApplyReplace'>Replace existing delta</label></td>
+    </tr>
+  </table>
+  <button id='btnApplyRulesToPatternList' disabled title='Applies to the current Pattern List'>Apply to Pattern List</button>
+  <div id='divApplyRulesResult' style='font-size:11px;margin-top:4px;'></div>
+
   <h3>Pattern Bins</h3>
   <div id='divPatternBins'></div>
   <h3>Duplicate Glyph Sequences</h3>
@@ -2497,7 +2673,6 @@ function buildPatternBins() {
       <td id='ddJSONFile'>
         Drag .GPOSE file
         <br/><input type='checkbox' id='cbAppend'><label for='cbAppend'>Append New Words</label></input>
-        <br/><input type='checkbox' id='cbOnlyEmpty'><label for='cbOnlyEmpty'>Only Apply to Words With No Delta</label></input>
       </td>
       <td><span id='ddGPOSEFileName'></span></td>
       <td><span id='ddGPOSEFileResult'></span></td>
@@ -2513,6 +2688,7 @@ function buildPatternBins() {
 
 <div id='divMAIN' hidden>
 <button style='background-color:#afa;' id='btnLoadDelta' onclick='loadDeltaFile();'>Load GPOSE Changes</button>
+<input type='checkbox' id='cbOnlyEmpty'><label for='cbOnlyEmpty'>No Delta only</label></input>
 <button style='background-color:#fac;' id='btnSaveHB' onclick='saveHarfBuzzData({saveTxt:false, saveJson:true, saveJson5:false,saveFontInfo:true,});'>Save ZIP</button>
 <button style='background-color:#faa;' id='btnSaveDelta' onclick='saveDeltaFile();'>Save GPOSE Changes</button>
 
@@ -2736,6 +2912,8 @@ patchEventClick(doDownloadList, [btnDownloadList]);
 patchEventClick(doPasteList, [btnPasteList]);
 patchEventClick(doPatternListCopy, [btnPatternListCopy]);
 patchEventClick(doDownloadPatternListForMining, [btnDownloadPatternListForMining]);
+patchEventClick(doLoadRulesFile, [btnLoadRulesFile]);
+patchEventClick(doApplyRulesToPatternList, [btnApplyRulesToPatternList]);
 patchEventClick(doPatternDialogShow, [btnPatternDialogShow]);
 
 patchEventClick(doDupScan, [btnDupScan]);
@@ -2759,7 +2937,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-09-05 1430
+<br/>2026-09-06 1930
 </body>
 
 
