@@ -379,7 +379,7 @@ class WordList {
    * Apply a deltaArray that has been loaded from JSON5
    */
   applyDeltaArrayEntry(de, options={}) {
-    const {addNewWords = true} = options;
+    const {addNewWords = true, onlyIfEmpty = false} = options;
       let wse = this.findWord(de.w);
       if (!wse) {
         this._unfound++;
@@ -393,6 +393,10 @@ class WordList {
           return false;
         }
       } else {
+        if (onlyIfEmpty && wse.hasDelta()) {
+          this._skipped++;
+          return false;
+        }
         this._found++;
         if (de.dir && (de.dir !== wse.getDirection())) {
           wse.setDirection(de.dir);
@@ -419,17 +423,18 @@ class WordList {
       }
   }
   applyDeltaArrayFromLoad(da, options={}) {
-    const {addNewWords = true} = options;
     this._unfound = 0;
     this._found = 0;
+    this._skipped = 0;
     da.forEach(de=> {
-      this.applyDeltaArrayEntry(de);
+      this.applyDeltaArrayEntry(de, options);
     });
     this.buildDeltaChoices();
     this.buildStatistics();
     return {
       found: this._found,
       unfound: this._unfound,
+      skipped: this._skipped,
     }
   }
 
