@@ -231,6 +231,7 @@ class WordList {
   addWord(word) {
     if (!this.findWord(word)) {
       const entry = new WordListEntry(word);
+      entry._index = this.list.length; // cached for O(1) find() - this.list is append-only, so stable forever
       this.list.push(entry);
       this.map.set(word, entry);
       return true;
@@ -247,7 +248,8 @@ class WordList {
     return this.list[index];
   }
   find(word) {
-    return this.list.findIndex(e => e.w == word);
+    const e = this.map.get(word);
+    return e ? e._index : -1;
   }
   shape(index, gposGids) {
     return this.list[index].shape(this, gposGids);
@@ -349,16 +351,30 @@ class WordList {
   }
   /*
    * Create the delta array for JSON5 + saving
+   *
+   * @param {object}  options
+   * @param {boolean} options.stripFinalGlyphAx - drop `ax` on the LAST glyph
+   *   in visual order (we.delta.length - 1) for every word. That glyph's own
+   *   advance only affects what comes after the word (next word / line end),
+   *   never any glyph within it, so a human edit that set it there reflects
+   *   no real GPOS correction. The GPOS Pattern Miner already strips this
+   *   same value on import for RTL words specifically (io/zip-reader.mjs's
+   *   RTL remap deletes ax at its own lexically-first position, which is
+   *   this same visual-last glyph) - stripping it here too, for both
+   *   directions, keeps a ZIP export from carrying a value nothing downstream
+   *   ever uses, so it stops showing up as a spurious diff in comparisons.
    */
-  createDeltaArrayForSave() {
+  createDeltaArrayForSave(options={}) {
+    const { stripFinalGlyphAx=false } = options;
     const da = [];
     this.list.forEach(we=> {
       if (we.delta) {
         const delta = [];
+        const finalIdx = we.delta.length - 1;
         we.delta.forEach((de, dei)=> {
           let diff = false;
           const den = {i:dei};
-          if (de.ax) { diff = true; den.ax = de.ax; }
+          if (de.ax && !(stripFinalGlyphAx && dei === finalIdx)) { diff = true; den.ax = de.ax; }
           if (de.dx) { diff = true; den.dx = de.dx; }
           if (de.dy) { diff = true; den.dy = de.dy; }
           if (diff) delta.push(den);
