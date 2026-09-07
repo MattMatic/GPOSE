@@ -100,3 +100,58 @@ export function applyPatternsToWord(hb, rulesByGID) {
   }
   return vrs;
 }
+
+/**
+ * Propagate a mark's leader's dx/dy correction onto the mark itself, mirroring
+ * HarfBuzz's own mark/mkmk attachment behaviour: an attached mark automatically
+ * follows whatever dx/dy correction its leader (base) receives at render time.
+ * Mined rules only ever encode the RESIDUAL a mark needs on top of that
+ * automatic propagation (see gpos-miner's data/residual-deltas.mjs, which
+ * computes and subtracts it out during mining, and is fed into
+ * pattern-miner.mjs as the actual training target) - so
+ * applyPatternsToWord()'s own output for a mark glyph is that residual, not
+ * the total displacement. A flat per-glyph delta model with no attachment
+ * concept of its own (GPOSE's own we.delta) needs this added back in before
+ * the value means anything outside a real HarfBuzz shaping call.
+ *
+ * Deliberately NOT folded into applyPatternsToWord() itself: gpos-miner's own
+ * mining self-check specifically compares its raw (residual-only) output
+ * against a residual-adjusted expected value, and making this
+ * propagation-aware there would break that comparison. This is strictly an
+ * additional step for the two "apply already-mined rules" consumers
+ * (gpos-miner's apply-main.mjs, and GPOSE's own native Apply Mined Rules
+ * here), never for the mining self-check.
+ *
+ * ax/ay (advances) are NOT propagated by HarfBuzz mark attachment - only
+ * dx/dy (placement) - so only those two fields are adjusted here.
+ *
+ * A single flat pass over all pairs is sufficient even for multi-level
+ * attachment chains, mirroring residual-deltas.mjs's own assumption:
+ * HarfBuzz's attachment trace already reports each follower's pair directly
+ * against its ultimate leader, not just its immediate parent, so no
+ * recursion or pair ordering is required here either.
+ *
+ * @param {Map<number,{dx,dy,ax,ay}>}         vrs         - applyPatternsToWord()'s own output; NOT mutated
+ * @param {Iterable<[number,number]>}         markPairs   - [followerIdx, leaderIdx] pairs, same index space as vrs
+ * @param {(idx:number)=>({dx?:number,dy?:number}|undefined)} getExisting
+ *        - dx/dy for a leader position vrs has no entry for (e.g. left
+ *          unchanged this run); return undefined (or zeros) if there is none
+ * @returns {Map<number,{dx,dy,ax,ay}>} a NEW map - vrs itself is untouched
+ */
+export function propagateMarkAttachment(vrs, markPairs, getExisting) {
+  const result = new Map(vrs);
+  for (const [follower, leader] of markPairs) {
+    const leaderVR = result.get(leader) ?? getExisting(leader);
+    const leaderDx = leaderVR?.dx || 0, leaderDy = leaderVR?.dy || 0;
+    if (!leaderDx && !leaderDy) continue; // nothing to propagate
+
+    const ownVR = result.get(follower);
+    result.set(follower, {
+      dx: (ownVR?.dx || 0) + leaderDx,
+      dy: (ownVR?.dy || 0) + leaderDy,
+      ax: ownVR?.ax || 0,
+      ay: ownVR?.ay || 0,
+    });
+  }
+  return result;
+}

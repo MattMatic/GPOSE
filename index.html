@@ -168,12 +168,13 @@ import { HarfBuzzShaping, jsonToSvg, CursivesSets, MarksSets } from './js/hbshap
 import { CPaths64, HarfBuzzGlyphs, Clipper2Z, clipperGC } from './js/hbclipper.mjs';
 import { FontForceField, FORCEFIELD_QUALITY } from './js/fontforcefield.mjs';
 import { lcsWithGapConstraints } from './js/lcsgap.mjs';
-import { WordListEntry, WordList, DEFAULT_IGNORABLE_CODEPOINTS } from './js/wordlist.mjs';
+import { WordListEntry, WordList } from './js/wordlist.mjs';
 import { ShapePool } from './js/workerpool.mjs';
 import { findDuplicateClusters, printDuplicateClusters } from './js/findduplicates.mjs';
 import { checkRulesFormat } from './js/rules-format.mjs';
 import { resolveRules } from './js/rules-loader.mjs';
-import { buildRulesByGID, applyPatternsToWord } from './js/rule-dispatch.mjs';
+import { buildRulesByGID, applyPatternsToWord, propagateMarkAttachment } from './js/rule-dispatch.mjs';
+import { buildIgnorableGids } from './js/ignorable-glyphs.mjs';
 import JSON5 from './js/json5.index.min.mjs';
 //import { BSON, EJSON } from './js/bson.mjs';
 
@@ -253,11 +254,12 @@ window.fff = fff;
 window.FORCEFIELD_QUALITY = FORCEFIELD_QUALITY;
 window.clipperGC = clipperGC;
 window.JSON5 = JSON5;
-window.DEFAULT_IGNORABLE_CODEPOINTS = DEFAULT_IGNORABLE_CODEPOINTS;
 window.checkRulesFormat = checkRulesFormat;
 window.resolveRules = resolveRules;
 window.buildRulesByGID = buildRulesByGID;
+window.propagateMarkAttachment = propagateMarkAttachment;
 window.applyPatternsToWord = applyPatternsToWord;
+window.buildIgnorableGids = buildIgnorableGids;
 //window.BSON = BSON;
 //window.EJSON = EJSON;
 window.lcsWithGapConstraints = lcsWithGapConstraints;
@@ -868,8 +870,8 @@ function DateTimeForFilename() {
          d.slice(11,13)+d.slice(14,16)+d.slice(17,19);
 }
 
-function createDeltaJson(use5 = true) {
-  const da = wordList.createDeltaArrayForSave();
+function createDeltaJson(use5 = true, deltaOptions = {}) {
+  const da = wordList.createDeltaArrayForSave(deltaOptions);
   const gpose = {
     delta: da,
     font: {
@@ -1020,7 +1022,7 @@ async function saveHarfBuzzData(options={}) {
 
   // Add the delta file
   await progressPanel.start(3, 'ZIP');
-  zip.file('data/delta.json', emptyDelta ? JSON.stringify({delta:[]}, null, 1) : createDeltaJson(false));
+  zip.file('data/delta.json', emptyDelta ? JSON.stringify({delta:[]}, null, 1) : createDeltaJson(false, {stripFinalGlyphAx:true}));
   await progressPanel.setProgress(1);
 
   const zipBlob = await zip.generateAsync({
@@ -2156,7 +2158,7 @@ function setPatternList(list, merge) {
 // Populate (or merge into, with Ctrl) the pattern list with every word from the selected
 // Source List (see dlgPatternApply) that has no delta applied, and is at least as bad as
 // the selected quality threshold (e.g. 'Kerning' includes Kerning/Near/Collision)
-function doFindZeroDeltaWords(event) {
+async function doFindZeroDeltaWords(event) {
   // Minimum FORCEFIELD_QUALITY a word must have to pass the filter. Built lazily here (rather
   // than as a module-load-time constant) since FORCEFIELD_QUALITY comes from an async module
   // (index.html:164) that isn't guaranteed to have run yet at this script's top-level.
@@ -2170,12 +2172,17 @@ function doFindZeroDeltaWords(event) {
   const minQuality = qualityThreshold[selZeroDeltaQuality.value] ?? -1;
   const sourceList = getFilteredList().list;
   const indices = [];
-  for (const idx of sourceList) {
+  await progressPanel.start(sourceList.length, 'Finding Zero-Delta Words', true);
+  for (let i=0; i<sourceList.length; i++) {
+    await progressPanel.setProgress(i);
+    if (progressPanel.aborted()) break;
+    const idx = sourceList[i];
     const we = wordList.get(idx);
     if (we.hasDelta()) continue;
     if ((we.getQuality() ?? FORCEFIELD_QUALITY.OK) < minQuality) continue;
     indices.push(idx);
   }
+  await progressPanel.done();
   setPatternList(indices, event.ctrlKey);
   dlgPatternApply.close();
   showStatistics();
@@ -2248,8 +2255,8 @@ function renderRulesInfo() {
   const verMatch  = !src.fontVersion  || (src.fontVersion  === curVer);
 
   let html = `${loadedRules.patterns.length} rule(s) resolved`;
-  html += `<br/>Rules mined from: <b>${src.fontFullName ?? '(unknown)'}</b> v${src.fontVersion ?? '?'}`;
-  html += `<br/>Current font: <b>${curName ?? '(unknown)'}</b> v${curVer ?? '?'}`;
+  html += `<br/>Rules mined from: <b>${src.fontFullName ?? '(unknown)'}</b> ${src.fontVersion ?? '?'}`;
+  html += `<br/>Current font: <b>${curName ?? '(unknown)'}</b> ${curVer ?? '?'}`;
   if (!nameMatch || !verMatch) {
     html += `<br/><font color='red'>&#9888; Font ${!nameMatch ? 'name' : 'version'} differs from the rules file's source - deltas may not be meaningful.</font>`;
   }
@@ -2262,16 +2269,14 @@ function renderRulesInfo() {
 
 // GIDs of Default_Ignorable glyphs in the CURRENT font - HarfBuzz skips these
 // transparently when matching GPOS ChainContextPos rules, and the mined rules'
-// context sequences were built against sequences with them already stripped
-// (see gpos-miner's data/harfbuzz-index.mjs), so dispatch here must match.
+// context sequences were built against sequences with them already stripped.
+// Uses the SAME name-based detection as gpos-miner's own mining (js/ignorable-glyphs.mjs,
+// copied verbatim from gpos-miner/js/data/ignorable-glyphs.mjs) rather than an
+// independently-written codepoint-based check - the two are not guaranteed to
+// agree for a given font, and disagreement here silently misaligns every
+// subsequent context match for any word containing a glyph the two disagree on.
 function getIgnorableGidsForCurrentFont() {
-  const gids = new Set();
-  const max = hbs.getGlyphCount();
-  for (let gid=0; gid<max; gid++) {
-    const unicodes = hbs.getGlyphUnicodes(gid) || [];
-    if (unicodes.some(cp => DEFAULT_IGNORABLE_CODEPOINTS.has(cp))) gids.add(gid);
-  }
-  return gids;
+  return buildIgnorableGids((name) => hbs.getGlyphIdByName(name));
 }
 
 // Build the glyph-id sequence to run rule dispatch against, plus a map back to
@@ -2288,24 +2293,29 @@ function getIgnorableGidsForCurrentFont() {
 // Uses gP (the GPOS-phase glyph id) over g when available, matching
 // saveHarfBuzzData()'s own entryToHbTxt() convention - the two can differ for
 // certain mark/ligature-component glyphs, and the rules were mined against gP.
+// Also returns nativeToDispatch (the inverse of toNativeIdx), needed to translate
+// we.hb.attachments.marks' native-space mark/leader pairs into dispatch-space
+// indices for propagateMarkAttachment() - built in the same pass, no extra cost.
 function buildDispatchHbAndResolver(we, ignorableGids) {
   const hb = we.hb;
   const maxGlyphs = hb.length;
   const rtl = !!hb.rtl;
   const dispatchHb = [];
   const toNativeIdx = [];
+  const nativeToDispatch = new Map();
   for (let pass=0; pass<maxGlyphs; pass++) {
     const nativeIdx = rtl ? (maxGlyphs - 1 - pass) : pass;
     const ge = hb[nativeIdx];
     const gid = (typeof ge.gP === 'number') ? ge.gP : ge.g;
     if (ignorableGids.has(gid)) continue;
     dispatchHb.push({ g: gid });
+    nativeToDispatch.set(nativeIdx, toNativeIdx.length);
     toNativeIdx.push(nativeIdx);
   }
-  return { dispatchHb, toNativeIdx };
+  return { dispatchHb, toNativeIdx, nativeToDispatch };
 }
 
-function doApplyRulesToPatternList() {
+async function doApplyRulesToPatternList() {
   if (!loadedRules) return;
   const list = getPatternList();
   if (!list || list.length === 0) {
@@ -2317,7 +2327,11 @@ function doApplyRulesToPatternList() {
   const ignorableGids = getIgnorableGidsForCurrentFont();
 
   let wordsTouched = 0, wordsSkipped = 0, glyphsTouched = 0;
-  for (const idx of list) {
+  await progressPanel.start(list.length, 'Applying Mined Rules', true);
+  for (let i=0; i<list.length; i++) {
+    await progressPanel.setProgress(i);
+    if (progressPanel.aborted()) break;
+    const idx = list[i];
     const we = wordList.get(idx);
     if (onlyEmpty && we.hasDelta()) { wordsSkipped++; continue; }
 
@@ -2330,8 +2344,24 @@ function doApplyRulesToPatternList() {
       wordChanged = true;
     }
 
-    const { dispatchHb, toNativeIdx } = buildDispatchHbAndResolver(we, ignorableGids);
-    const vrs = applyPatternsToWord(dispatchHb, rulesByGID);
+    const { dispatchHb, toNativeIdx, nativeToDispatch } = buildDispatchHbAndResolver(we, ignorableGids);
+    const rawVrs = applyPatternsToWord(dispatchHb, rulesByGID);
+
+    // applyPatternsToWord() only computes the RESIDUAL a mark needs on top of what
+    // HarfBuzz's own mark/mkmk attachment propagates automatically from its base at
+    // render time (see rule-dispatch.mjs's propagateMarkAttachment for the full
+    // explanation) - we.delta has no attachment concept of its own, so that
+    // propagated portion has to be added back in before writing a final value.
+    const markPairsNative = we.hb.attachments?.marks?.marks ?? [];
+    const dispatchMarkPairs = [];
+    for (const [followerNative, leaderNative] of markPairsNative) {
+      const f = nativeToDispatch.get(followerNative);
+      const l = nativeToDispatch.get(leaderNative);
+      if (f !== undefined && l !== undefined) dispatchMarkPairs.push([f, l]);
+    }
+    const vrs = dispatchMarkPairs.length > 0
+      ? propagateMarkAttachment(rawVrs, dispatchMarkPairs, (dispatchIdx) => we.delta[toNativeIdx[dispatchIdx]])
+      : rawVrs;
 
     for (const [dispatchIdx, corr] of vrs) {
       const nativeIdx = toNativeIdx[dispatchIdx];
@@ -2347,6 +2377,7 @@ function doApplyRulesToPatternList() {
       wordsTouched++;
     }
   }
+  await progressPanel.done();
 
   wordList.buildDeltaChoices();
   refreshSVG(null, null, true);
@@ -2937,7 +2968,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-09-06 1930
+<br/>2026-09-07 1220
 </body>
 
 
