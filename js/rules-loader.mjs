@@ -21,6 +21,16 @@
  * A glyph name with no GID in the target font (renamed/removed since the
  * rules were mined) drops just that context entry or pattern, rather than
  * failing the whole load - the target font is the authority.
+ *
+ * '.notdef' context entries are dropped from left/right sequences (not
+ * treated as a normal missing-glyph name) rather than voiding the whole
+ * alternative: a rules file mined before the GPOS Pattern Miner's
+ * Default_Ignorable/.notdef context-stripping fix can have a literal
+ * '.notdef' baked into a context slot (e.g. from an unmapped RLM/LRM) - every
+ * font resolves '.notdef' to GID 0, so this would otherwise resolve "clean"
+ * on the target font and keep silently misfiring exactly as it did when
+ * mined, instead of being healed by re-loading against a current build of
+ * this tool.
  */
 
 import { checkRulesFormat } from './rules-format.mjs';
@@ -36,6 +46,7 @@ export function resolveRules(rulesDoc, gidOf) {
 
   const warnings = [];
   const missingNames = new Set();
+  let notdefDropped = 0;
   const gidOfTracked = (name) => {
     const gid = gidOf(name);
     if (gid === undefined) missingNames.add(name);
@@ -49,8 +60,11 @@ export function resolveRules(rulesDoc, gidOf) {
 
     const contextGroupList = [];
     for (const g of p.contextGroups ?? []) {
-      const left  = (g.left  ?? []).map(gidOfTracked);
-      const right = (g.right ?? []).map(gidOfTracked);
+      const rawLeft  = g.left  ?? [];
+      const rawRight = g.right ?? [];
+      notdefDropped += rawLeft.filter(n => n === '.notdef').length + rawRight.filter(n => n === '.notdef').length;
+      const left  = rawLeft.filter(n => n !== '.notdef').map(gidOfTracked);
+      const right = rawRight.filter(n => n !== '.notdef').map(gidOfTracked);
       if (left.some(g => g === undefined) || right.some(g => g === undefined)) continue; // drop this alternative only
       contextGroupList.push({ leftContexts: [left], rightContexts: [right] });
     }
@@ -72,6 +86,9 @@ export function resolveRules(rulesDoc, gidOf) {
 
   if (missingNames.size > 0) {
     warnings.push(`${missingNames.size} glyph name(s) from the rules file were not found in this font: ${[...missingNames].slice(0, 20).join(', ')}${missingNames.size > 20 ? ', …' : ''}`);
+  }
+  if (notdefDropped > 0) {
+    warnings.push(`${notdefDropped} '.notdef' context entr${notdefDropped === 1 ? 'y was' : 'ies were'} dropped from this rules file (it was mined before a fix for Default_Ignorable marks with no cmap entry, e.g. RLM/LRM - re-mine and re-export to get a clean file).`);
   }
   if (patterns.length < (rulesDoc.patterns?.length ?? 0)) {
     warnings.push(`${(rulesDoc.patterns?.length ?? 0) - patterns.length} of ${rulesDoc.patterns?.length ?? 0} pattern(s) were dropped (target or all context alternatives unresolved).`);
