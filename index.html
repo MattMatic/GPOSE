@@ -2609,7 +2609,7 @@ function buildPatternBins() {
       <td valign="top"></td>
       <td>
         <button id='btnPatternApply' title='Hold Ctrl key to merge into pattern list' style='background-color:#f83; color:white;'>Apply Changes</button>
-        <input type='checkbox' id='cbForceApply'><label for='cbForceApply'>Force changes</label>
+        <input type='checkbox' id='cbForceApply'><label for='cbForceApply'>F<u>o</u>rce changes</label>
       </td>
       <td>
         <button id='btnPatternCopy'>Copy List</button>
@@ -2920,6 +2920,7 @@ shortcut.add('Alt+K', () => radPatternKerning.click());
 shortcut.add('Alt+M', () => radPatternMaybe.click());
 shortcut.add('Alt+P', () => radPatternPattern.click());
 shortcut.add('Alt+D', () => radPatternEdited.click());
+shortcut.add('Alt+O', () => cbForceApply.click());
 
 patchEventClick(patternApply, [btnPatternApply]);
 patchEventClick(patternCopy, [btnPatternCopy]);
@@ -2968,7 +2969,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-09-07 1220
+<br/>2026-10-12 0920
 </body>
 
 
