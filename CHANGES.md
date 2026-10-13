@@ -1,5 +1,8 @@
 Changes
 -------
+# 2026-10-13
++ Hold Shift when clicking "Paste from Clipboard", "Find Zero-Delta Words" or "Save to Pattern List" to remove those words from the Pattern List (Ctrl still merges)
+
 # 2026-09-07
 - Fixed Apply Mined Rules dropping the automatic base-to-mark correction HarfBuzz applies at render time
 - Fixed Apply Mined Rules mismatching glyphs that should be ignored (ZWNJ etc.) during matching

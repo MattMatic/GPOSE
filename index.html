@@ -1755,13 +1755,19 @@ async function patternMatchFind() {
   patternShowSvg(0);
 }
 
+// True when the pattern has a `*` apply-marker, i.e. the button changes deltas ("Apply Changes");
+// false when it only stores the matched words ("Save to Pattern List").
+function patternIsApplyMode() {
+  return /\*\s*[\p{L}.]/u.test(inpPattern.value);
+}
+
 function inpPatternChanged(e) {
-  const pattern = inpPattern.value;
-  const re = new RegExp(/\*\s*[\p{L}.]/u);
-  if (re.test(pattern)) {
+  if (patternIsApplyMode()) {
     btnPatternApply.innerHTML = '<u>A</u>pply Changes';
+    btnPatternApply.title = 'Hold Ctrl key to merge into pattern list';
   } else {
     btnPatternApply.innerHTML = 'S<u>a</u>ve to Pattern List';
+    btnPatternApply.title = 'Hold Ctrl key to merge into pattern list, or Shift key to remove these words from it';
   }
 }
 
@@ -1772,6 +1778,7 @@ async function patternApply(event) {
   let changed = 0;
   let better = 0;
   let unchanged = 0;
+  let removed = 0;
   const forceApply = cbForceApply.checked;
   await progressPanel.start(max, 'Apply', true);
   for (let i=0; i<max; i++) {
@@ -1810,7 +1817,15 @@ async function patternApply(event) {
   }
   await progressPanel.done();
   wordList.buildStatistics();
-  if (event.ctrlKey) {
+  // Shift only means "subtract" in "Save to Pattern List" mode (no deltas are changed, so the
+  // matched words are simply removed from the list). In "Apply Changes" mode Shift is ignored.
+  const subtract = event.shiftKey && !patternIsApplyMode();
+  if (subtract) {
+    const remove = new Set(edited);
+    const before = wordList.filtered.pattern.length;
+    wordList.filtered.pattern = wordList.filtered.pattern.filter(v => !remove.has(v)); // order preserved
+    removed = before - wordList.filtered.pattern.length;
+  } else if (event.ctrlKey) {
     // Comine them
     const set = new Set(wordList.filtered.pattern);
     for (const v of edited) set.add(v);
@@ -1825,7 +1840,10 @@ async function patternApply(event) {
   showStatistics();
   //dlgPatternApply.hidden = true;
   //divMAIN.hidden = false;
-  window.alert(`Changed: ${changed}\r\nBetter: ${better}\r\nLeft: ${unchanged}`);
+  if (subtract)
+    window.alert(`Removed from Pattern List: ${removed}\r\nPattern List now: ${wordList.filtered.pattern.length}`);
+  else
+    window.alert(`Changed: ${changed}\r\nBetter: ${better}\r\nLeft: ${unchanged}`);
 }
 
 async function patternCopy(event) {
@@ -2074,7 +2092,10 @@ function doDownloadList() {
 // Paste from clipboard to the pattern list
 // Text might be one-word-per-line, or separated by ` | ` (from the GPOS Pattern Miner Designer Report)
 // Hold Ctrl-key down while clicking to append, rather than replace
+// Hold Shift-key down while clicking to subtract these words from the list instead
+// (words not already in the word list are skipped rather than added)
 async function doPasteList(event) {
+  const mode = patternListMode(event);
   let txt;
   try {
     txt = await navigator.clipboard.readText();
@@ -2102,7 +2123,7 @@ async function doPasteList(event) {
     const idx = wordList.find(w);
     if (idx >= 0) {
       list.push(idx);
-    } else {
+    } else if (mode !== 'subtract') {
       // Add the new word ?
       wordList.addWord(w);
       const idx = wordList.find(w);
@@ -2114,7 +2135,7 @@ async function doPasteList(event) {
   }
   await progressPanel.done();
 
-  setPatternList(list, event.ctrlKey);
+  setPatternList(list, mode);
 
   dlgPatternOperations.close();
 }
@@ -2143,11 +2164,28 @@ function getPatternList() {
   return wordList.filtered.pattern ?? [];
 }
 
-function setPatternList(list, merge) {
-  if (!merge) wordList.filtered.pattern = [];
-  const set = new Set(wordList.filtered.pattern);
-  if (list) for (const v of list) set.add(v);
-  wordList.filtered.pattern = Array.from(set); // preserve insertion order
+// How a click should change the Pattern List: Shift = subtract from it, Ctrl = merge into it,
+// neither = replace it. Shift wins if both are held, so a stray Ctrl can never turn a
+// subtract into a merge.
+function patternListMode(event) {
+  if (event?.shiftKey) return 'subtract';
+  if (event?.ctrlKey)  return 'merge';
+  return 'replace';
+}
+
+// `mode` is 'replace' | 'merge' | 'subtract'. Plain booleans are still accepted
+// (true = merge, false = replace) for callers that only ever merge or replace.
+function setPatternList(list, mode) {
+  if (mode === 'subtract') {
+    const remove = new Set(list ?? []);
+    wordList.filtered.pattern = (wordList.filtered.pattern ?? []).filter(v => !remove.has(v)); // order preserved
+  } else {
+    const merge = (mode === 'merge') || (mode === true);
+    if (!merge) wordList.filtered.pattern = [];
+    const set = new Set(wordList.filtered.pattern);
+    if (list) for (const v of list) set.add(v);
+    wordList.filtered.pattern = Array.from(set); // preserve insertion order
+  }
   radClassPattern.disabled = wordList.filtered.pattern.length == 0;
 
   refreshSVG();
@@ -2155,9 +2193,9 @@ function setPatternList(list, merge) {
   showStatistics();
 }
 
-// Populate (or merge into, with Ctrl) the pattern list with every word from the selected
-// Source List (see dlgPatternApply) that has no delta applied, and is at least as bad as
-// the selected quality threshold (e.g. 'Kerning' includes Kerning/Near/Collision)
+// Populate (or merge into with Ctrl, or subtract from with Shift) the pattern list with every
+// word from the selected Source List (see dlgPatternApply) that has no delta applied, and is
+// at least as bad as the selected quality threshold (e.g. 'Kerning' includes Kerning/Near/Collision)
 async function doFindZeroDeltaWords(event) {
   // Minimum FORCEFIELD_QUALITY a word must have to pass the filter. Built lazily here (rather
   // than as a module-load-time constant) since FORCEFIELD_QUALITY comes from an async module
@@ -2183,7 +2221,7 @@ async function doFindZeroDeltaWords(event) {
     indices.push(idx);
   }
   await progressPanel.done();
-  setPatternList(indices, event.ctrlKey);
+  setPatternList(indices, patternListMode(event));
   dlgPatternApply.close();
   showStatistics();
 }
@@ -2529,7 +2567,7 @@ function buildPatternBins() {
     <tr>
       <td></td>
       <td colspan=2>
-        <button id='btnFindZeroDelta' title='Hold Ctrl key to merge into pattern list'>Find Zero-Delta Words</button>
+        <button id='btnFindZeroDelta' title='Hold Ctrl key to merge into pattern list, or Shift key to remove these words from it'>Find Zero-Delta Words</button>
         <label for='selZeroDeltaQuality'>at least:</label>
         <select id='selZeroDeltaQuality'>
           <option value='all'>All</option>
@@ -2621,7 +2659,7 @@ function buildPatternBins() {
 <dialog id='dlgPatternOperations'>
   <button type='submit' aria-label='close' onclick='dlgPatternOperations.close();'>X</button>
   <h3>Pattern List Operations</h2>
-  <button id='btnPasteList' title='Hold Ctrl key to merge into pattern list'>Paste from Clipboard</button>
+  <button id='btnPasteList' title='Hold Ctrl key to merge into pattern list, or Shift key to remove these words from it'>Paste from Clipboard</button>
   <br/><button id='btnPatternListCopy'>Copy to Clipboard</button>
   <br/><button id='btnDownloadList'>Download to file</button>
   <br/><button id='btnDownloadPatternListForMining' title='ZIP for the GPOS Pattern Miner: fontinfo.json + harfbuzz.json for these words, no deltas'>Download for GPOS Pattern Miner</button>
@@ -2939,6 +2977,14 @@ const divWordDT = new DoubleTapDetector(divWord, () => {
   chooseFile(handleWordDropFiles, {multiple:false});
 });
 
+// These buttons use Shift as a modifier (Shift-click = subtract from the Pattern List), but the
+// browser also treats Shift+mousedown as "extend the text selection", highlighting page text.
+// Cancel just that default action; the button's own click event is unaffected.
+function suppressShiftSelect(arr) {
+  arr.forEach(e => e.addEventListener('mousedown', ev => { if (ev.shiftKey) ev.preventDefault(); }));
+}
+suppressShiftSelect([btnPasteList, btnFindZeroDelta, btnPatternApply]);
+
 patchEventClick(processWordsInitial, [btnProcessWords]);
 patchEventClick(doDownloadList, [btnDownloadList]);
 patchEventClick(doPasteList, [btnPasteList]);
@@ -2969,7 +3015,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-10-12 0920
+<br/>2026-10-13 1534
 </body>
 
 
