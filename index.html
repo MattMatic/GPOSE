@@ -2977,6 +2977,14 @@ const divWordDT = new DoubleTapDetector(divWord, () => {
   chooseFile(handleWordDropFiles, {multiple:false});
 });
 
+// These buttons use Shift as a modifier (Shift-click = subtract from the Pattern List), but the
+// browser also treats Shift+mousedown as "extend the text selection", highlighting page text.
+// Cancel just that default action; the button's own click event is unaffected.
+function suppressShiftSelect(arr) {
+  arr.forEach(e => e.addEventListener('mousedown', ev => { if (ev.shiftKey) ev.preventDefault(); }));
+}
+suppressShiftSelect([btnPasteList, btnFindZeroDelta, btnPatternApply]);
+
 patchEventClick(processWordsInitial, [btnProcessWords]);
 patchEventClick(doDownloadList, [btnDownloadList]);
 patchEventClick(doPasteList, [btnPasteList]);
@@ -3007,7 +3015,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-10-13 1520
+<br/>2026-10-13 1534
 </body>
 
 
