@@ -19,6 +19,7 @@
 import Clipper2ZFactory from "./clipper2z.js"
 import {quadBezFlatten, cubicBezNumQuadratics, evalQuadBez } from "./flatbezier.js"
 import { HarfBuzzShaping } from "./hbshaping.mjs"
+import { setClipper, getBrush, expandWithBrush } from './brush-expand.mjs';
 
 const promises = [
       Clipper2ZFactory(),
@@ -51,6 +52,7 @@ const clipperRegistry = new FinalizationRegistry((ps64) => {
 
 const clipperReady = Promise.all(promises).then(([aClipper2Z]) => {
   Clipper2Z = aClipper2Z;
+  setClipper(Clipper2Z);
 });
 
 /*
@@ -187,10 +189,15 @@ class CPaths64 {
     } = options;
     const result = new CPaths64();
     let p = this.paths64;
+    const brush = idelta.getBrush();
+    const value = idelta.getScale();
     if (remove) {
       p = Difference64(p, remove.paths64, FillRule.NonZero);
     }
-    let newpaths64 = InflatePaths64(p, idelta, jointype, EndType.Polygon, mitreLimit, arcTolerance);
+    if (brush) {
+      p = expandWithBrush(p, brush);
+    }
+    let newpaths64 = InflatePaths64(p, value, jointype, EndType.Polygon, mitreLimit, arcTolerance);
     if (simplifyFactor > 0) {
       const oldpaths64 = newpaths64;
       newpaths64 = SimplifyPaths64(oldpaths64, simplifyFactor);

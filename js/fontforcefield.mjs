@@ -7,6 +7,7 @@
 import { CursivesSets, MarksSets, HarfBuzzShaping } from './hbshaping.mjs';
 import { CPaths64, HarfBuzzGlyphs, Clipper2Z } from './hbclipper.mjs';
 import JSON5 from './json5.index.min.mjs'
+import { getBrush, expandWithBrush } from './brush-expand.mjs';
 
 function oldOrNew(theOld, theNew) {
   if (typeof theOld !== 'undefined') return theOld;
@@ -23,6 +24,57 @@ const FORCEFIELD_QUALITY = {
   KERNING: 2,
   MAYBE: 1,
   OK: 0,
+}
+
+function splitFirst(str) {
+  if (!str) return null;
+  if (typeof str === 'number') return [str, ''];
+  const m = str.match(/^\s*(\d+(?:\.\d+)?%?)[\s,]*(.*?)\s*$/s);
+  return m ? [m[1], m[2]] : null;
+}
+
+// Class to handle field size and optional brush
+class FieldValue {
+  constructor(val, def) {
+    this.default = def;
+    this.brush = undefined;
+    this.scale = 1;
+    const arr = splitFirst(val);
+    if (arr) {
+      const v = arr[0];
+      if (typeof v === 'number')
+        this.scale = v;
+      else {
+        this.scale = parseFloat(arr[0]);
+        if (arr[0].includes('%')) {
+          if (!this.default) throw new Error(`Default FieldValue default not defined (${val})`);
+          this.scale = Math.round(this.scale / 100.0 * this.default.getScale());
+        }        
+      }
+      if (arr[1] !== '') {
+        this.brushText = arr[1];
+        this.brush = getBrush(this.brushText);
+      }
+    }
+  }
+  enlarge(percent) {
+    // For the far fields values
+    const res = new FieldValue(undefined, this.def);
+    res.brush = this.brush;
+    res.scale = Math.round(this.scale / 100.0 * (100.0 + percent));
+    return res;
+  }
+  getScale() {
+    return this.scale;
+  }
+  getBrush() {
+    if (!this.brush) return this.default?.brush;
+    return this.brush;
+  }
+  compare(other) {
+    if (!other) return false;
+    return (other.scale === this.scale) && (other.brushText === this.brushText);
+  }
 }
 
 class FontForceField {
@@ -409,54 +461,45 @@ class FontForceField {
     const hbs = hbg.hbs;
     const isMark = hbs.isGlyphMark(gid);
     const gd = this.getGlyphData(gid);
-    var near = this.defaults.baseNear || 30;
-    var far  = this.defaults.baseFar  || 90;
-    let nearBase;
-    let clusterOverlap;
-    if (isMark) {
-      near  = this.defaults.markNear || 30;
-      far   = this.defaults.markFar  || 90;
-      nearBase = this.defaults.markNearBase || 1;
-    }
-    if (gd) {
-      function toValue(txt, v) {
-        if (txt === null) return v;
-        if (!isAssigned(txt)) return v;
-        if (typeof txt !== 'string') return txt;
-        const n = parseFloat(txt);
-        if (isNaN(n)) return v;
-        if (txt.includes('%')) {
-          const rv = Math.round((v*n)/100.0);
-          return rv;
-        }
-        return Math.round(n);
-      }
-      far  = toValue(gd.far, far);
-      near = toValue(gd.near, near);
-      if (isMark) nearBase = toValue(gd.nearBase, nearBase);
-      clusterOverlap = gd.clusterOverlap;
+
+    if (!isAssigned(gd)) {
+      // Infrequent
+      const fv = isMark ? this.defaults.markFar : this.defaults.baseFar;
+      const nv = isMark ? this.defaults.markNear : this.defaults.baseNear;
+      const nbv = this.defaults.markNearBase;
+      return {
+        far: fv,
+        near: nv,
+        nearBase: nbv,
+        clusterOverlap: undefined,
+      };
     }
     return {
-      far: far,
-      near: near,
-      nearBase: nearBase,
-      clusterOverlap: clusterOverlap,
+      far: gd.far,
+      near: gd.near,
+      nearBase: gd.nearBase,
+      clusterOverlap: gd.clusterOverlap,
     }
   }
   jsonSetBase(near, far) {
-    if ((near != this.defaults.baseNear) || (far != this.defaults.baseFar)) {
+    const nv = new FieldValue(near);
+    const fv = new FieldValue(far);
+    if (!nv.compare(this.defaults.baseNear) || !fv.compare(this.defaults.baseFar)) {
       this.clearFields();
     }
-    this.defaults.baseNear = near;
-    this.defaults.baseFar  = far;
+    this.defaults.baseNear = nv;
+    this.defaults.baseFar  = fv;
   }
   jsonSetMark(near, nearBase, far) {
-    if ((near != this.defaults.markNear) || (nearBase != this.defaults.markNearBase) || (far != this.defaults.markFar)) {
+    const nv = new FieldValue(near);
+    const nbv = new FieldValue(nearBase);
+    const fv = new FieldValue(far);
+    if (!nv.compare(this.defaults.markNear) || !fv.compare(this.defaults.markFar) || !nbv.compare(this.defaults.markNearBase)) {
       this.clearFields();
     }
-    this.defaults.markNear = near;
-    this.defaults.markNearBase = nearBase;
-    this.defaults.markFar = far;
+    this.defaults.markNear = nv;
+    this.defaults.markNearBase = nbv;
+    this.defaults.markFar = fv;
   }
   jsonSetScriptLanguage(script, language) {
     this.script = script;
@@ -692,9 +735,10 @@ class FontForceField {
     if (!isAssigned(clusterOverlap))
       clusterOverlap = this.defaults.clusterOverlap;
     const gv = {};
-    if (isAssigned(far))  gv.far = far;
-    if (isAssigned(near)) gv.near = near;
-    if (isAssigned(nearBase)) gv.nearBase = nearBase;
+    const isMark = hbs.isGlyphMark(gid);
+    gv.near = new FieldValue(near, isMark ? this.defaults.markNear : this.defaults.baseNear);
+    gv.far  = new FieldValue(far,  isMark ? this.defaults.markFar : this.defaults.baseFar);
+    gv.nearBase = new FieldValue(nearBase, this.defaults.markNearBase);
     if (isAssigned(clusterOverlap)) gv.clusterOverlap = clusterOverlap;
 
     this.addGlyphData(gid, gv);

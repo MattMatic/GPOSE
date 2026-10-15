@@ -1987,6 +1987,7 @@ async function handleDropJSON(fileObject) {
   }
   catch(e) {
     ddJSONFileResult.innerHTML = `<font color='red'>${e}</font>`;
+    console.error(e);
     return;
   }
   fileObject.loaded = (jsonText && (jsonText.length > 0));
@@ -3015,7 +3016,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-10-13 1534
+<br/>2026-10-15 1350
 </body>
 
 
