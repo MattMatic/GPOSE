@@ -194,10 +194,16 @@ class CPaths64 {
     if (remove) {
       p = Difference64(p, remove.paths64, FillRule.NonZero);
     }
+    let brushed;
     if (brush) {
-      p = expandWithBrush(p, brush);
+      brushed = expandWithBrush(p, brush);
+      p = brushed;
     }
     let newpaths64 = InflatePaths64(p, value, jointype, EndType.Polygon, mitreLimit, arcTolerance);
+    if (brushed) {
+      brushed.clear();
+      brushed.delete();
+    }
     if (simplifyFactor > 0) {
       const oldpaths64 = newpaths64;
       newpaths64 = SimplifyPaths64(oldpaths64, simplifyFactor);
@@ -464,6 +470,7 @@ class GlyphFields {
   constructor(cp64) {
     this.cp64 = cp64;
     this.fields = new Map();
+    this.fieldsStale = false;  // true: the named fields must be (re)built by the field builder before use
   }
   destroy() {
     this.fields.forEach((fv, fk) => {
@@ -494,6 +501,7 @@ class GlyphFields {
       v.destroy();
     });
     this.fields.clear();
+    this.fieldsStale = true;
   }
   copyOffset(x, y) {
     const ngf = new GlyphFields( this.cp64.translateToNewCPaths64(x, y) );
@@ -522,6 +530,23 @@ class HarfBuzzGlyphs {
     this.hbs = hbs;
   }
   getHarfBuzzShaping() { return this.hbs; }
+  // Register fn(glyphId) which (re)builds the named fields of a glyph with addField().
+  // It is called lazily, the first time a glyph's fields are needed after clearFields().
+  setFieldBuilder(fn) { this.fieldBuilder = fn; }
+  // Get the glyph, first building its named fields if they are stale
+  ensureFields(glyphId) {
+    const gf = this.getGlyph(glyphId);
+    if (gf.fieldsStale && this.fieldBuilder) {
+      gf.fieldsStale = false;   // Before building, as the builder calls addField()
+      try {
+        this.fieldBuilder(glyphId);
+      } catch (e) {
+        gf.clearFields();       // Discard the partial build, and stay stale so it is retried
+        throw e;
+      }
+    }
+    return gf;
+  }
   fontChanged() {
     this.freeCache();
   }
@@ -621,6 +646,7 @@ class HarfBuzzGlyphs {
     cpaths64.glyphMark = this.hbs.isGlyphMark(glyphId);
     cpaths64.findBoundingBox();
     gf = new GlyphFields(cpaths64);
+    gf.fieldsStale = true;
     this.glyphs.set(glyphId, gf); // Result cached in this object
     return gf;
   }
@@ -630,9 +656,8 @@ class HarfBuzzGlyphs {
     return gf.addField(key, amount, options);
   }
   getField(glyphId, key) {
-    const gf = this.getGlyph(glyphId);
-    if (!key) return gf;
-    return gf.getField(key);
+    if (!key) return this.getGlyph(glyphId);
+    return this.ensureFields(glyphId).getField(key);
   }
   getFieldKeys(glyphId) {
     const gf = this.getGlyph(glyphId);
@@ -641,11 +666,8 @@ class HarfBuzzGlyphs {
   }
   clearFields(glyphId) {
     if (!glyphId) {
-      const max = this.hbs.getGlyphCount();
-      for (let i=0; i<max; i++) {
-        const gf = this.getGlyph(i);
-        if (gf) gf.clearFields();
-      }
+      // Only glyphs already created have fields; the rest are stale by default
+      this.glyphs.forEach(gf => gf.clearFields());
       return;
     }
     const gf = this.getGlyph(glyphId);
@@ -666,7 +688,7 @@ class HarfBuzzGlyphs {
     let x = 0;
     let y = 0;
     hbresult.forEach((r, idx) => {
-      const gf = this.getGlyph(r.g);
+      const gf = this.ensureFields(r.g);
       result.push({
         g:  r.g,
         ox: x,

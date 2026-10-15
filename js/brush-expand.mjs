@@ -127,17 +127,53 @@ export function expandWithBrush(paths, B, clipper) {
   const c = requireClipper(clipper);
   const bands = new c.Paths64();
   try {
-    for (const { xs, ys } of readRings(paths)) {
+    const rings = readRings(paths);
+    for (const { xs, ys } of rings) {
       const n = xs.length;
       for (let k = 0; k < n; k++) {
         const j = (k + 1) % n, ex = xs[j] - xs[k], ey = ys[j] - ys[k];
         if (ex || ey) pushPath(c, bands, sweepPiece(xs[k], ys[k], ex, ey, B));
       }
     }
-    return c.Union64(paths, bands, c.FillRule.NonZero);
+    const out = c.Union64(paths, bands, c.FillRule.NonZero);
+    return matchOrientation(c, out, totalSignedArea(rings));
   } finally {
     bands.delete();
   }
+}
+
+/** Sum of the signed (shoelace) areas of the rings. Outer rings dominate holes, so the sign is the outer orientation. */
+function totalSignedArea(rings) {
+  let a = 0;
+  for (const { xs, ys } of rings) {
+    const n = xs.length;
+    for (let k = 0; k < n; k++) {
+      const j = (k + 1) % n;
+      a += xs[k] * ys[j] - xs[j] * ys[k];
+    }
+  }
+  return a;
+}
+
+/**
+ * Clipper's Union64 output has its own orientation, which can be the opposite of the input's.
+ * The caller unions this result with other fields under FillRule.NonZero, where mixed
+ * orientations cancel where they overlap (so the fields would not merge). Reverse every ring
+ * if needed so the result has the same orientation as the input. Takes ownership of `out`.
+ */
+function matchOrientation(c, out, inputArea) {
+  const rings = readRings(out);
+  const outArea = totalSignedArea(rings);
+  if (inputArea === 0 || outArea === 0 || (inputArea > 0) === (outArea > 0)) return out;
+  const fixed = new c.Paths64();
+  for (const { xs, ys } of rings) {
+    const pts = [];
+    for (let k = xs.length - 1; k >= 0; k--) pts.push([xs[k], ys[k]]);
+    pushPath(c, fixed, pts);
+  }
+  out.clear();
+  out.delete();
+  return fixed;
 }
 
 // ---------------------------------------------------------------------------

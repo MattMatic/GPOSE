@@ -160,6 +160,7 @@ button.action { font-size: 12px; padding: 4px 10px; }
 <script type="text/javascript" src="./js/jszip.min.js"></script>
 <script type="text/javascript" src="./js/FileSaver.min.js"></script>
 <script type="text/javascript" src="./js/textarea-mru.js"></script>
+<script type="text/javascript" src="./js/jsoneditor-panel.js"></script>
 
 <script type="module" async defer>
 'use strict';
@@ -223,7 +224,10 @@ function applyShapeResult(entry, r) {
 }
 
 function onFontOrJsonLoaded(jsonText) {
-  if (typeof jsonText === 'string') lastJsonText = jsonText;
+  if (typeof jsonText === 'string') {
+    lastJsonText = jsonText;
+    if (typeof JsonEditorPanel !== 'undefined') JsonEditorPanel.onExternalLoad(jsonText);
+  }
   maybeInitShapePool();
 }
 
@@ -231,6 +235,9 @@ window.getShapePool = getShapePool;
 window.applyShapeResult = applyShapeResult;
 window.restoreAttachmentPrototypes = restoreAttachmentPrototypes;
 window.onFontOrJsonLoaded = onFontOrJsonLoaded;
+window.getLastJsonText = () => lastJsonText;
+window.setLastJsonText = (t) => { lastJsonText = t; };
+window.reinitShapePool = maybeInitShapePool;
 
 const promises = [
   createHarfBuzz()
@@ -2761,6 +2768,7 @@ function buildPatternBins() {
 <input type='checkbox' id='cbOnlyEmpty'><label for='cbOnlyEmpty'>No Delta only</label></input>
 <button style='background-color:#fac;' id='btnSaveHB' onclick='saveHarfBuzzData({saveTxt:false, saveJson:true, saveJson5:false,saveFontInfo:true,});'>Save ZIP</button>
 <button style='background-color:#faa;' id='btnSaveDelta' onclick='saveDeltaFile();'>Save GPOSE Changes</button>
+<button id='btnJsonEditor' onclick='JsonEditorPanel.toggle();'>JSON Editor</button>
 
 <table border=0 width="100%">
   <tr>
@@ -3016,7 +3024,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-10-15 1350
+<br/>2026-10-15 2030
 </body>
 
 

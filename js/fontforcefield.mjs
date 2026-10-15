@@ -37,14 +37,15 @@ function splitFirst(str) {
 class FieldValue {
   constructor(val, def) {
     this.default = def;
-    this.brush = undefined;
-    this.scale = 1;
+    this.brush = def?.brush;
+    this.scale = def?.scale;      
     const arr = splitFirst(val);
     if (arr) {
       const v = arr[0];
       if (typeof v === 'number')
         this.scale = v;
-      else {
+      else 
+      if (typeof v === 'string') {
         this.scale = parseFloat(arr[0]);
         if (arr[0].includes('%')) {
           if (!this.default) throw new Error(`Default FieldValue default not defined (${val})`);
@@ -437,23 +438,25 @@ class FontForceField {
       }
     }
 
-    // Create all the appropriate cached glyph fields
-    const max = hbs.getGlyphCount();
-    for (let gid=0; gid<max; gid++) {
-      const gv = this.jsonGetGlyphValues(gid);
-      hbg.addField(gid, 'near', gv.near);
-      hbg.addField(gid, 'far',  gv.far);
-      if (typeof gv.nearBase === 'number') {
-        hbg.addField(gid, 'nearBase', gv.nearBase);
-      }
-      if (this.glyphInBars(gid)) {
-        const bar = this.getBarCPath();
-        const options = {
-          remove: bar,
-        };
-        hbg.addField(gid, 'nearBar', gv.near, options);
-        hbg.addField(gid, 'farBar', gv.far, options);
-      }
+    // The glyph fields are built lazily, per glyph, the first time each is needed
+    hbg.setFieldBuilder((gid) => this.buildGlyphFields(gid));
+  }
+  // Create the appropriate cached fields for a glyph
+  buildGlyphFields(gid) {
+    const hbg = this.hbg;
+    const gv = this.jsonGetGlyphValues(gid);
+    hbg.addField(gid, 'near', gv.near);
+    hbg.addField(gid, 'far',  gv.far);
+    if (typeof gv.nearBase === 'number') {
+      hbg.addField(gid, 'nearBase', gv.nearBase);
+    }
+    if (this.glyphInBars(gid)) {
+      const bar = this.getBarCPath();
+      const options = {
+        remove: bar,
+      };
+      hbg.addField(gid, 'nearBar', gv.near, options);
+      hbg.addField(gid, 'farBar', gv.far, options);
     }
   }
   jsonGetGlyphValues(gid) {
@@ -881,7 +884,7 @@ class FontForceField {
     let y = 0;
     for (let idx=0; idx<ev.hb.length; idx++) {
       const e = ev.hb[idx];
-      const gf = hbg.getField(e.g);
+      const gf = hbg.ensureFields(e.g);
       const options = {};
 
       options.x = x + e.dx + (idx * stretch);
