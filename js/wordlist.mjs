@@ -473,6 +473,11 @@ class WordList {
     this.currentIndex = index;
   }
   leavingCurrentEntry() {
+    // Optional hook: onLeavingEntry(entry, zeroBasedIndex)
+    if (this.onLeavingEntry) {
+      const ce = this.getCurrentEntry();
+      if (ce) this.onLeavingEntry(ce, this.currentIndex);
+    }
     /*
     const ce = this.getCurrentEntry();
     if (!ce) return;

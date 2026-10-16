@@ -20,6 +20,45 @@ const JsonEditorPanel = (() => {
   let appliedText = null;    // JSON text the whole word list was last evaluated with
   let timer = 0;
   let busy = false;
+  // Words whose stored rating was re-evaluated under the previewed (unapplied) JSON,
+  // with a snapshot of the rating they had under the applied JSON.
+  const touched = new Map();   // entry -> {ev, note, q, deltaSig}
+
+  const deltaSig = (entry) => JSON.stringify(entry.saveDelta());
+
+  function isPreviewing() {
+    return goodText !== null && appliedText !== null && goodText !== appliedText;
+  }
+
+  // Called by renderSVG just before it re-evaluates a word while previewing
+  function beforeEvaluate(entry) {
+    if (touched.has(entry)) return;
+    touched.set(entry, { ev: entry.ev, note: entry.note, q: entry.getQuality(), deltaSig: deltaSig(entry) });
+  }
+
+  // Words moved away from whose rating changed because of the JSON go into the History breadcrumbs
+  function onLeavingEntry(entry, index0) {
+    const snap = touched.get(entry);
+    if (!snap || !isPreviewing()) return;
+    if (entry.getQuality() === snap.q) return;
+    breadCrumbAdd(index0 + 1);
+    divBreadCrumbs.innerHTML = breadCrumbCreateHtml();
+  }
+
+  // Put back the ratings of the touched words (the JSON is back to the applied one), and recount
+  function restoreTouched() {
+    touched.forEach((snap, entry) => {
+      if (deltaSig(entry) === snap.deltaSig) {
+        entry.ev = snap.ev;
+        entry.note = snap.note;
+      } else {
+        entry.evaluate(wordList, evaluateOptionsFast);   // deltas were edited meanwhile
+      }
+    });
+    touched.clear();
+    wordList.buildStatistics();
+    showStatistics();
+  }
 
   function build() {
     const style = document.createElement('style');
@@ -37,6 +76,8 @@ const JsonEditorPanel = (() => {
       #jsonEditorPanel .jep-status.stale { color:#a60; }
     `;
     document.head.appendChild(style);
+
+    wordList.onLeavingEntry = onLeavingEntry;
 
     panel = document.createElement('div');
     panel.id = 'jsonEditorPanel';
@@ -135,6 +176,7 @@ const JsonEditorPanel = (() => {
     try {
       const t0 = performance.now();
       loadIntoMain(text);
+      if (!isPreviewing()) restoreTouched();   // typed back to the applied JSON
       renderSVG(true);
       updateStaleStatus();
       console.log(`JSON preview ${Math.round(performance.now() - t0)}ms`);
@@ -150,6 +192,7 @@ const JsonEditorPanel = (() => {
     // Always reload (even if the text matches goodText) so every field is rebuilt from scratch
     try {
       loadIntoMain(ta.value);
+      restoreTouched();
       renderSVG(true);
       updateStaleStatus();
     } catch (e) {
@@ -224,6 +267,7 @@ const JsonEditorPanel = (() => {
         setStatus('Cancelled. Word ratings are only partly re-evaluated; run "Apply to all" again.', 'stale');
       } else {
         appliedText = text;
+        touched.clear();   // every word has just been re-evaluated with this JSON
         updateStaleStatus();
       }
     } catch (e) {
@@ -239,8 +283,9 @@ const JsonEditorPanel = (() => {
   // Call when a new JSON file is loaded elsewhere (drag/drop), so the panel follows it.
   function onExternalLoad(text) {
     goodText = appliedText = text;
+    touched.clear();
     if (ta) { ta.value = text; updateStaleStatus(); }
   }
 
-  return { show, hide, toggle, onExternalLoad };
+  return { show, hide, toggle, onExternalLoad, isPreviewing, beforeEvaluate };
 })();

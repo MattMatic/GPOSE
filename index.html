@@ -729,6 +729,9 @@ function renderSVG(full) {
   let hb = entry?.hb;
   if (!hb) return;
   current.entry = entry;
+  // While a JSON edit is previewed (not yet applied to all), evaluate every word shown live
+  const previewing = (typeof JsonEditorPanel !== 'undefined') && JsonEditorPanel.isPreviewing();
+  if (previewing) full = true;
   let svgRes;
   if (showBefore) {
     const resBefore = entry.toSVGBefore(wordList, svgOptions, evaluateOptionsFast);
@@ -737,6 +740,7 @@ function renderSVG(full) {
     current.note = resBefore.note;
   } else {
     if (full) {
+      if (previewing) JsonEditorPanel.beforeEvaluate(entry);
       entry.evaluate(wordList, evaluateOptionsFast);
     }
     svgRes = entry.toSVG(wordList, svgOptions);
@@ -3024,7 +3028,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-10-15 2030
+<br/>2026-10-16 0835
 </body>
 
 
