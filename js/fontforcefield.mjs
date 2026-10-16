@@ -34,6 +34,17 @@ function splitFirst(str) {
 }
 
 // Class to handle field size and optional brush
+// ---------------------------------------------------------------------------
+// TUNABLE CONSTANT: the smallest "island" of the far field that counts, in font units squared.
+// The union of the per-glyph far fields can leave tiny disconnected slivers (a few units
+// across, area ~2) where offset edges nearly touch. Without this they are counted as islands
+// and wrongly make a word rate Kerning/Maybe. Real far fields are tens of thousands or more.
+// If this ever needs per-font tuning, move it into the JSON (e.g. a "min_island_area" key).
+// ---------------------------------------------------------------------------
+const FAR_MIN_ISLAND_AREA = 100;
+
+const ISLAND_COLORS = ['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#008b8b','#b8860b','#808000'];
+
 class FieldValue {
   constructor(val, def) {
     this.default = def;
@@ -259,10 +270,10 @@ class FontForceField {
     const collisionsGlyphs = CPaths64.unionOf(collisionsGlyphsParts);
 
     // Now count the islands to see if we have "Far" situations
-    const islandsBase = overallFar.getArea();
+    const islandsBase = overallFar.getArea(FAR_MIN_ISLAND_AREA);
     overallAll = overallMarks.duplicatePath();
     overallAll.unionWith(overallFar);
-    const islandsAll = overallAll.getArea();
+    const islandsAll = overallAll.getArea(FAR_MIN_ISLAND_AREA);
     const islandsBaseCount = islandsBase.fillCount;
     const islandsAllCount  = islandsAll.fillCount;
 
@@ -288,7 +299,7 @@ class FontForceField {
             const of = overallFar.duplicatePath();
             const mf = e.gf.getField('far');
             of.unionWith(mf);
-            const oi = of.getArea().fillCount;
+            const oi = of.getArea(FAR_MIN_ISLAND_AREA).fillCount;
             if (oi < islandsBaseCount) {
               e.glue = true;
               counts.glue++;
@@ -325,7 +336,11 @@ class FontForceField {
         for (let pn=0; pn<pnmax; pn++) {
           const pbb = overallAll.findPathBoundingBox(pn);
           if (pbb.positive) {
-            bb.push( pbb );
+            // Ignore rounding slivers, as islandsAll does
+            const pth = overallAll.paths64.get(pn);
+            const pArea = Math.abs(Clipper2Z.AreaPath64(pth));
+            pth.delete();
+            if (pArea >= FAR_MIN_ISLAND_AREA) bb.push( pbb );
           }
         }
         // First, do this in the X-direction
@@ -739,9 +754,18 @@ class FontForceField {
       clusterOverlap = this.defaults.clusterOverlap;
     const gv = {};
     const isMark = hbs.isGlyphMark(gid);
-    gv.near = new FieldValue(near, isMark ? this.defaults.markNear : this.defaults.baseNear);
-    gv.far  = new FieldValue(far,  isMark ? this.defaults.markFar : this.defaults.baseFar);
-    gv.nearBase = new FieldValue(nearBase, this.defaults.markNearBase);
+    let nv = isMark ? this.defaults.markNear : this.defaults.baseNear;
+    let fv = isMark ? this.defaults.markFar : this.defaults.baseFar;
+    let nbv = this.defaults.markNearBase;
+    const gd = this.getGlyphData(gid);
+    if (gd) {
+      nv = gd.near;
+      fv = gd.far;
+      nbv = gd.nearBase;
+    }
+    gv.near = new FieldValue(near, nv);
+    gv.far  = new FieldValue(far,  fv);
+    gv.nearBase = new FieldValue(nearBase, nbv);
     if (isAssigned(clusterOverlap)) gv.clusterOverlap = clusterOverlap;
 
     this.addGlyphData(gid, gv);
@@ -849,6 +873,7 @@ class FontForceField {
       showFarBase=false,
       showFarMarks=false,
       showFarAll=true,
+      showIslands=false,
       showCollisions=true,
       showGlue=true,
       showBase=true,
@@ -868,6 +893,27 @@ class FontForceField {
       });
     Object.keys(ev.fields).forEach(k=>ev.fields[k].findBoundingBox());
 
+    if (showIslands) {
+      // Colour each island of the BASE far field (so a mark gluing two of them together
+      // is easy to spot). Islands made up of marks only (not touching the base far field)
+      // are added after them, with a heavier outline.
+      let n = 0;
+      const drawIsland = (isl, markOnly) => {
+        const col = ISLAND_COLORS[n++ % ISLAND_COLORS.length];
+        svg += isl.toSVG({fillColor:col, fillOpacity:0.2, strokeColor:col, strokeWidth:markOnly ? 30 : 12, strokeOpacity:fixedOpacity,});
+        isl.freePath();
+      };
+      ev.fields.overallFar.splitIslands(FAR_MIN_ISLAND_AREA).forEach(isl => drawIsland(isl, false));
+      ev.fields.overallAll.splitIslands(FAR_MIN_ISLAND_AREA).forEach(isl => {
+        const touch = isl.collisionCPath(ev.fields.overallFar);
+        if (touch) {
+          touch.freePath();
+          isl.freePath();
+        } else {
+          drawIsland(isl, true);
+        }
+      });
+    } else
     if (showFarAll) {
       svg += ev.fields.overallAll.toSVG({strokeColor:'#8af',strokeWidth:8,strokeOpacity:fixedOpacity,});
     }

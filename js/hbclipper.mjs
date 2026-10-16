@@ -295,17 +295,22 @@ class CPaths64 {
     clip.delete();
     return new CPaths64(merged);
   }
-  getArea() {
+  // @param {number} [minFillArea=0] - fill paths smaller than this are ignored (not counted, no area),
+  //   so rounding slivers from the union are not mistaken for islands. Holes are unaffected.
+  getArea(minFillArea=0) {
     const { IsPositive64, AreaPath64, Paths64 } = Clipper2Z;
     const count = this.paths64.size();
     let pcount = 0;
     let ncount = 0;
     let parea = 0;
     let narea = 0;
+    const items = [];
     for (let i=0; i<count; i++) {
       const path = this.paths64.get(i);
       const area = Math.abs(AreaPath64(path));
-      if (IsPositive64(path)) {
+      const positive = IsPositive64(path);
+      items.push({ area, positive });
+      if (positive) {
         parea += area;
         pcount++;
       } else {
@@ -314,20 +319,58 @@ class CPaths64 {
       }
       path.delete();
     }
-    const sums = {};
-    if ((narea > parea) && (ncount > 0)) {
-      sums.fillArea  = narea;
-      sums.fillCount = ncount;
-      sums.holeArea  = parea;
-      sums.holeCount = pcount;
-    } else {
-      sums.fillArea  = parea;
-      sums.fillCount = pcount;
-      sums.holeArea  = narea;
-      sums.holeCount = ncount;
-    }
+    // The dominant orientation (by total area, using every path) is the fill orientation
+    const fillPositive = !((narea > parea) && (ncount > 0));
+    const sums = { fillArea: 0, fillCount: 0, holeArea: 0, holeCount: 0 };
+    items.forEach(it => {
+      if (it.positive === fillPositive) {
+        if (it.area < minFillArea) return;
+        sums.fillArea += it.area;
+        sums.fillCount++;
+      } else {
+        sums.holeArea += it.area;
+        sums.holeCount++;
+      }
+    });
     sums.area = sums.fillArea - sums.holeArea;
     return sums;
+  }
+  // Split into separate "islands": each fill path together with the hole paths inside it.
+  // Fill paths are those with the dominant orientation (as in getArea()).
+  // @param {number} [minFillArea=0] - fill paths smaller than this are skipped (see getArea())
+  // @return {CPaths64[]} new CPaths64 objects; the caller must .freePath() each one
+  splitIslands(minFillArea=0) {
+    const { IsPositive64, AreaPath64, PointInPolygon64, Paths64 } = Clipper2Z;
+    const count = this.paths64.size();
+    const info = [];
+    let parea = 0, narea = 0;
+    for (let i=0; i<count; i++) {
+      const path = this.paths64.get(i);
+      const area = Math.abs(AreaPath64(path));
+      const positive = IsPositive64(path);
+      if (positive) parea += area; else narea += area;
+      info.push({ path, area, positive });
+    }
+    const fillPositive = !(narea > parea);
+    const fills = info.filter(e => e.positive === fillPositive && e.area >= minFillArea);
+    const islands = fills.map(f => {
+      const ps = new Paths64();
+      ps.push_back(f.path);
+      return { ps, area: f.area, path: f.path };
+    });
+    info.filter(e => e.positive !== fillPositive).forEach(h => {
+      const pt = h.path.get(0);
+      // Smallest fill path containing this hole
+      let best;
+      islands.forEach(isl => {
+        if (PointInPolygon64(pt, isl.path).value < 2 && (!best || isl.area < best.area)) best = isl;
+      });
+      pt.delete();
+      if (best) best.ps.push_back(h.path);
+    });
+    const result = islands.map(isl => new CPaths64(isl.ps));
+    info.forEach(e => e.path.delete());
+    return result;
   }
   countIslands() {
     const { IsPositive64 } = Clipper2Z;
