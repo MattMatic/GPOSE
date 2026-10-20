@@ -161,6 +161,7 @@ button.action { font-size: 12px; padding: 4px 10px; }
 <script type="text/javascript" src="./js/FileSaver.min.js"></script>
 <script type="text/javascript" src="./js/textarea-mru.js"></script>
 <script type="text/javascript" src="./js/jsoneditor-panel.js"></script>
+<script type="text/javascript" src="./js/placement-panel.js"></script>
 
 <script type="module" async defer>
 'use strict';
@@ -810,6 +811,7 @@ function renderSVG(full) {
     tdTLKernMaybe.style.backgroundColor = '';
     tdTLGood.style.backgroundColor = '';        
   }
+  if (typeof PlacementPanel !== 'undefined') PlacementPanel.onRender();
 }
 
 function refreshSVG(e, n, forceUpdate) {
@@ -2801,6 +2803,7 @@ function buildPatternBins() {
 <button style='background-color:#fac;' id='btnSaveHB' onclick='saveHarfBuzzData({saveTxt:false, saveJson:true, saveJson5:false,saveFontInfo:true,});'>Save ZIP</button>
 <button style='background-color:#faa;' id='btnSaveDelta' onclick='saveDeltaFile();'>Save GPOSE Changes</button>
 <button id='btnJsonEditor' onclick='JsonEditorPanel.toggle();'>JSON Editor</button>
+<button id='btnPlacement' onclick='PlacementPanel.toggle();' title='Scatter plot of a glyph placement across the active list'>Placement</button>
 
 <table border=0 width="100%">
   <tr>

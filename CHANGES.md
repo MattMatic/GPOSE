@@ -1,5 +1,8 @@
 Changes
 -------
+# 2026-10-20
++ Added the "Placement" panel - plots one glyph's dy/dx/ax (or absolute / base-relative dy) across the active list, grouped by context, to spot outliers; select bubbles to replace/add/subtract on the Pattern List or to generate a Bulk Apply pattern
+
 # 2026-10-13
 + Hold Shift when clicking "Paste from Clipboard", "Find Zero-Delta Words" or "Save to Pattern List" to remove those words from the Pattern List (Ctrl still merges)
 

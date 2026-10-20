@@ -219,11 +219,12 @@ const JsonEditorPanel = (() => {
     let cancelled = false;
     try {
       const max = wordList.length();
-      await progressPanel.start(max, 'Re-evaluating', true);
+      await progressPanel.start(max, 'Starting workers...', true);
 
       setLastJsonText(text);
       reinitShapePool();
       const pool = await getShapePool();
+      progressPanel.setMessage('Re-evaluating');
       if (pool) {
         const jobs = [];
         const entries = new Map();
