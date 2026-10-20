@@ -24,3 +24,6 @@ The JSON `GPOSE` file can be used as a human reference.
 
 However, the goal is to use automated algorithms to distil the GPOSE file into GPOS contextual
 substitution rules that can be emitted as a .fea for inclusion in the font build.
+
+# Help
+- [Placement scatter](PLACEMENT.md): plot one glyph's placement across a list, grouped by context, to find outliers.
