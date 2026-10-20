@@ -19,6 +19,7 @@
 import Clipper2ZFactory from "./clipper2z.js"
 import {quadBezFlatten, cubicBezNumQuadratics, evalQuadBez } from "./flatbezier.js"
 import { HarfBuzzShaping } from "./hbshaping.mjs"
+import { setClipper, getBrush, expandWithBrush } from './brush-expand.mjs';
 
 const promises = [
       Clipper2ZFactory(),
@@ -51,6 +52,7 @@ const clipperRegistry = new FinalizationRegistry((ps64) => {
 
 const clipperReady = Promise.all(promises).then(([aClipper2Z]) => {
   Clipper2Z = aClipper2Z;
+  setClipper(Clipper2Z);
 });
 
 /*
@@ -187,10 +189,21 @@ class CPaths64 {
     } = options;
     const result = new CPaths64();
     let p = this.paths64;
+    const brush = idelta.getBrush();
+    const value = idelta.getScale();
     if (remove) {
       p = Difference64(p, remove.paths64, FillRule.NonZero);
     }
-    let newpaths64 = InflatePaths64(p, idelta, jointype, EndType.Polygon, mitreLimit, arcTolerance);
+    let brushed;
+    if (brush) {
+      brushed = expandWithBrush(p, brush);
+      p = brushed;
+    }
+    let newpaths64 = InflatePaths64(p, value, jointype, EndType.Polygon, mitreLimit, arcTolerance);
+    if (brushed) {
+      brushed.clear();
+      brushed.delete();
+    }
     if (simplifyFactor > 0) {
       const oldpaths64 = newpaths64;
       newpaths64 = SimplifyPaths64(oldpaths64, simplifyFactor);
@@ -282,17 +295,22 @@ class CPaths64 {
     clip.delete();
     return new CPaths64(merged);
   }
-  getArea() {
+  // @param {number} [minFillArea=0] - fill paths smaller than this are ignored (not counted, no area),
+  //   so rounding slivers from the union are not mistaken for islands. Holes are unaffected.
+  getArea(minFillArea=0) {
     const { IsPositive64, AreaPath64, Paths64 } = Clipper2Z;
     const count = this.paths64.size();
     let pcount = 0;
     let ncount = 0;
     let parea = 0;
     let narea = 0;
+    const items = [];
     for (let i=0; i<count; i++) {
       const path = this.paths64.get(i);
       const area = Math.abs(AreaPath64(path));
-      if (IsPositive64(path)) {
+      const positive = IsPositive64(path);
+      items.push({ area, positive });
+      if (positive) {
         parea += area;
         pcount++;
       } else {
@@ -301,20 +319,58 @@ class CPaths64 {
       }
       path.delete();
     }
-    const sums = {};
-    if ((narea > parea) && (ncount > 0)) {
-      sums.fillArea  = narea;
-      sums.fillCount = ncount;
-      sums.holeArea  = parea;
-      sums.holeCount = pcount;
-    } else {
-      sums.fillArea  = parea;
-      sums.fillCount = pcount;
-      sums.holeArea  = narea;
-      sums.holeCount = ncount;
-    }
+    // The dominant orientation (by total area, using every path) is the fill orientation
+    const fillPositive = !((narea > parea) && (ncount > 0));
+    const sums = { fillArea: 0, fillCount: 0, holeArea: 0, holeCount: 0 };
+    items.forEach(it => {
+      if (it.positive === fillPositive) {
+        if (it.area < minFillArea) return;
+        sums.fillArea += it.area;
+        sums.fillCount++;
+      } else {
+        sums.holeArea += it.area;
+        sums.holeCount++;
+      }
+    });
     sums.area = sums.fillArea - sums.holeArea;
     return sums;
+  }
+  // Split into separate "islands": each fill path together with the hole paths inside it.
+  // Fill paths are those with the dominant orientation (as in getArea()).
+  // @param {number} [minFillArea=0] - fill paths smaller than this are skipped (see getArea())
+  // @return {CPaths64[]} new CPaths64 objects; the caller must .freePath() each one
+  splitIslands(minFillArea=0) {
+    const { IsPositive64, AreaPath64, PointInPolygon64, Paths64 } = Clipper2Z;
+    const count = this.paths64.size();
+    const info = [];
+    let parea = 0, narea = 0;
+    for (let i=0; i<count; i++) {
+      const path = this.paths64.get(i);
+      const area = Math.abs(AreaPath64(path));
+      const positive = IsPositive64(path);
+      if (positive) parea += area; else narea += area;
+      info.push({ path, area, positive });
+    }
+    const fillPositive = !(narea > parea);
+    const fills = info.filter(e => e.positive === fillPositive && e.area >= minFillArea);
+    const islands = fills.map(f => {
+      const ps = new Paths64();
+      ps.push_back(f.path);
+      return { ps, area: f.area, path: f.path };
+    });
+    info.filter(e => e.positive !== fillPositive).forEach(h => {
+      const pt = h.path.get(0);
+      // Smallest fill path containing this hole
+      let best;
+      islands.forEach(isl => {
+        if (PointInPolygon64(pt, isl.path).value < 2 && (!best || isl.area < best.area)) best = isl;
+      });
+      pt.delete();
+      if (best) best.ps.push_back(h.path);
+    });
+    const result = islands.map(isl => new CPaths64(isl.ps));
+    info.forEach(e => e.path.delete());
+    return result;
   }
   countIslands() {
     const { IsPositive64 } = Clipper2Z;
@@ -457,6 +513,7 @@ class GlyphFields {
   constructor(cp64) {
     this.cp64 = cp64;
     this.fields = new Map();
+    this.fieldsStale = false;  // true: the named fields must be (re)built by the field builder before use
   }
   destroy() {
     this.fields.forEach((fv, fk) => {
@@ -487,6 +544,7 @@ class GlyphFields {
       v.destroy();
     });
     this.fields.clear();
+    this.fieldsStale = true;
   }
   copyOffset(x, y) {
     const ngf = new GlyphFields( this.cp64.translateToNewCPaths64(x, y) );
@@ -515,6 +573,23 @@ class HarfBuzzGlyphs {
     this.hbs = hbs;
   }
   getHarfBuzzShaping() { return this.hbs; }
+  // Register fn(glyphId) which (re)builds the named fields of a glyph with addField().
+  // It is called lazily, the first time a glyph's fields are needed after clearFields().
+  setFieldBuilder(fn) { this.fieldBuilder = fn; }
+  // Get the glyph, first building its named fields if they are stale
+  ensureFields(glyphId) {
+    const gf = this.getGlyph(glyphId);
+    if (gf.fieldsStale && this.fieldBuilder) {
+      gf.fieldsStale = false;   // Before building, as the builder calls addField()
+      try {
+        this.fieldBuilder(glyphId);
+      } catch (e) {
+        gf.clearFields();       // Discard the partial build, and stay stale so it is retried
+        throw e;
+      }
+    }
+    return gf;
+  }
   fontChanged() {
     this.freeCache();
   }
@@ -614,6 +689,7 @@ class HarfBuzzGlyphs {
     cpaths64.glyphMark = this.hbs.isGlyphMark(glyphId);
     cpaths64.findBoundingBox();
     gf = new GlyphFields(cpaths64);
+    gf.fieldsStale = true;
     this.glyphs.set(glyphId, gf); // Result cached in this object
     return gf;
   }
@@ -623,9 +699,8 @@ class HarfBuzzGlyphs {
     return gf.addField(key, amount, options);
   }
   getField(glyphId, key) {
-    const gf = this.getGlyph(glyphId);
-    if (!key) return gf;
-    return gf.getField(key);
+    if (!key) return this.getGlyph(glyphId);
+    return this.ensureFields(glyphId).getField(key);
   }
   getFieldKeys(glyphId) {
     const gf = this.getGlyph(glyphId);
@@ -634,11 +709,8 @@ class HarfBuzzGlyphs {
   }
   clearFields(glyphId) {
     if (!glyphId) {
-      const max = this.hbs.getGlyphCount();
-      for (let i=0; i<max; i++) {
-        const gf = this.getGlyph(i);
-        if (gf) gf.clearFields();
-      }
+      // Only glyphs already created have fields; the rest are stale by default
+      this.glyphs.forEach(gf => gf.clearFields());
       return;
     }
     const gf = this.getGlyph(glyphId);
@@ -659,7 +731,7 @@ class HarfBuzzGlyphs {
     let x = 0;
     let y = 0;
     hbresult.forEach((r, idx) => {
-      const gf = this.getGlyph(r.g);
+      const gf = this.ensureFields(r.g);
       result.push({
         g:  r.g,
         ox: x,

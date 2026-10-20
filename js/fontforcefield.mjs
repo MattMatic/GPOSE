@@ -7,6 +7,7 @@
 import { CursivesSets, MarksSets, HarfBuzzShaping } from './hbshaping.mjs';
 import { CPaths64, HarfBuzzGlyphs, Clipper2Z } from './hbclipper.mjs';
 import JSON5 from './json5.index.min.mjs'
+import { getBrush, expandWithBrush } from './brush-expand.mjs';
 
 function oldOrNew(theOld, theNew) {
   if (typeof theOld !== 'undefined') return theOld;
@@ -23,6 +24,69 @@ const FORCEFIELD_QUALITY = {
   KERNING: 2,
   MAYBE: 1,
   OK: 0,
+}
+
+function splitFirst(str) {
+  if (!str) return null;
+  if (typeof str === 'number') return [str, ''];
+  const m = str.match(/^\s*(\d+(?:\.\d+)?%?)[\s,]*(.*?)\s*$/s);
+  return m ? [m[1], m[2]] : null;
+}
+
+// Class to handle field size and optional brush
+// ---------------------------------------------------------------------------
+// TUNABLE CONSTANT: the smallest "island" of the far field that counts, in font units squared.
+// The union of the per-glyph far fields can leave tiny disconnected slivers (a few units
+// across, area ~2) where offset edges nearly touch. Without this they are counted as islands
+// and wrongly make a word rate Kerning/Maybe. Real far fields are tens of thousands or more.
+// If this ever needs per-font tuning, move it into the JSON (e.g. a "min_island_area" key).
+// ---------------------------------------------------------------------------
+const FAR_MIN_ISLAND_AREA = 100;
+
+const ISLAND_COLORS = ['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#008b8b','#b8860b','#808000'];
+
+class FieldValue {
+  constructor(val, def) {
+    this.default = def;
+    this.brush = def?.brush;
+    this.scale = def?.scale;      
+    const arr = splitFirst(val);
+    if (arr) {
+      const v = arr[0];
+      if (typeof v === 'number')
+        this.scale = v;
+      else 
+      if (typeof v === 'string') {
+        this.scale = parseFloat(arr[0]);
+        if (arr[0].includes('%')) {
+          if (!this.default) throw new Error(`Default FieldValue default not defined (${val})`);
+          this.scale = Math.round(this.scale / 100.0 * this.default.getScale());
+        }        
+      }
+      if (arr[1] !== '') {
+        this.brushText = arr[1];
+        this.brush = getBrush(this.brushText);
+      }
+    }
+  }
+  enlarge(percent) {
+    // For the far fields values
+    const res = new FieldValue(undefined, this.def);
+    res.brush = this.brush;
+    res.scale = Math.round(this.scale / 100.0 * (100.0 + percent));
+    return res;
+  }
+  getScale() {
+    return this.scale;
+  }
+  getBrush() {
+    if (!this.brush) return this.default?.brush;
+    return this.brush;
+  }
+  compare(other) {
+    if (!other) return false;
+    return (other.scale === this.scale) && (other.brushText === this.brushText);
+  }
 }
 
 class FontForceField {
@@ -206,10 +270,10 @@ class FontForceField {
     const collisionsGlyphs = CPaths64.unionOf(collisionsGlyphsParts);
 
     // Now count the islands to see if we have "Far" situations
-    const islandsBase = overallFar.getArea();
+    const islandsBase = overallFar.getArea(FAR_MIN_ISLAND_AREA);
     overallAll = overallMarks.duplicatePath();
     overallAll.unionWith(overallFar);
-    const islandsAll = overallAll.getArea();
+    const islandsAll = overallAll.getArea(FAR_MIN_ISLAND_AREA);
     const islandsBaseCount = islandsBase.fillCount;
     const islandsAllCount  = islandsAll.fillCount;
 
@@ -235,7 +299,7 @@ class FontForceField {
             const of = overallFar.duplicatePath();
             const mf = e.gf.getField('far');
             of.unionWith(mf);
-            const oi = of.getArea().fillCount;
+            const oi = of.getArea(FAR_MIN_ISLAND_AREA).fillCount;
             if (oi < islandsBaseCount) {
               e.glue = true;
               counts.glue++;
@@ -272,7 +336,11 @@ class FontForceField {
         for (let pn=0; pn<pnmax; pn++) {
           const pbb = overallAll.findPathBoundingBox(pn);
           if (pbb.positive) {
-            bb.push( pbb );
+            // Ignore rounding slivers, as islandsAll does
+            const pth = overallAll.paths64.get(pn);
+            const pArea = Math.abs(Clipper2Z.AreaPath64(pth));
+            pth.delete();
+            if (pArea >= FAR_MIN_ISLAND_AREA) bb.push( pbb );
           }
         }
         // First, do this in the X-direction
@@ -385,23 +453,25 @@ class FontForceField {
       }
     }
 
-    // Create all the appropriate cached glyph fields
-    const max = hbs.getGlyphCount();
-    for (let gid=0; gid<max; gid++) {
-      const gv = this.jsonGetGlyphValues(gid);
-      hbg.addField(gid, 'near', gv.near);
-      hbg.addField(gid, 'far',  gv.far);
-      if (typeof gv.nearBase === 'number') {
-        hbg.addField(gid, 'nearBase', gv.nearBase);
-      }
-      if (this.glyphInBars(gid)) {
-        const bar = this.getBarCPath();
-        const options = {
-          remove: bar,
-        };
-        hbg.addField(gid, 'nearBar', gv.near, options);
-        hbg.addField(gid, 'farBar', gv.far, options);
-      }
+    // The glyph fields are built lazily, per glyph, the first time each is needed
+    hbg.setFieldBuilder((gid) => this.buildGlyphFields(gid));
+  }
+  // Create the appropriate cached fields for a glyph
+  buildGlyphFields(gid) {
+    const hbg = this.hbg;
+    const gv = this.jsonGetGlyphValues(gid);
+    hbg.addField(gid, 'near', gv.near);
+    hbg.addField(gid, 'far',  gv.far);
+    if (typeof gv.nearBase === 'number') {
+      hbg.addField(gid, 'nearBase', gv.nearBase);
+    }
+    if (this.glyphInBars(gid)) {
+      const bar = this.getBarCPath();
+      const options = {
+        remove: bar,
+      };
+      hbg.addField(gid, 'nearBar', gv.near, options);
+      hbg.addField(gid, 'farBar', gv.far, options);
     }
   }
   jsonGetGlyphValues(gid) {
@@ -409,54 +479,45 @@ class FontForceField {
     const hbs = hbg.hbs;
     const isMark = hbs.isGlyphMark(gid);
     const gd = this.getGlyphData(gid);
-    var near = this.defaults.baseNear || 30;
-    var far  = this.defaults.baseFar  || 90;
-    let nearBase;
-    let clusterOverlap;
-    if (isMark) {
-      near  = this.defaults.markNear || 30;
-      far   = this.defaults.markFar  || 90;
-      nearBase = this.defaults.markNearBase || 1;
-    }
-    if (gd) {
-      function toValue(txt, v) {
-        if (txt === null) return v;
-        if (!isAssigned(txt)) return v;
-        if (typeof txt !== 'string') return txt;
-        const n = parseFloat(txt);
-        if (isNaN(n)) return v;
-        if (txt.includes('%')) {
-          const rv = Math.round((v*n)/100.0);
-          return rv;
-        }
-        return Math.round(n);
-      }
-      far  = toValue(gd.far, far);
-      near = toValue(gd.near, near);
-      if (isMark) nearBase = toValue(gd.nearBase, nearBase);
-      clusterOverlap = gd.clusterOverlap;
+
+    if (!isAssigned(gd)) {
+      // Infrequent
+      const fv = isMark ? this.defaults.markFar : this.defaults.baseFar;
+      const nv = isMark ? this.defaults.markNear : this.defaults.baseNear;
+      const nbv = this.defaults.markNearBase;
+      return {
+        far: fv,
+        near: nv,
+        nearBase: nbv,
+        clusterOverlap: undefined,
+      };
     }
     return {
-      far: far,
-      near: near,
-      nearBase: nearBase,
-      clusterOverlap: clusterOverlap,
+      far: gd.far,
+      near: gd.near,
+      nearBase: gd.nearBase,
+      clusterOverlap: gd.clusterOverlap,
     }
   }
   jsonSetBase(near, far) {
-    if ((near != this.defaults.baseNear) || (far != this.defaults.baseFar)) {
+    const nv = new FieldValue(near);
+    const fv = new FieldValue(far);
+    if (!nv.compare(this.defaults.baseNear) || !fv.compare(this.defaults.baseFar)) {
       this.clearFields();
     }
-    this.defaults.baseNear = near;
-    this.defaults.baseFar  = far;
+    this.defaults.baseNear = nv;
+    this.defaults.baseFar  = fv;
   }
   jsonSetMark(near, nearBase, far) {
-    if ((near != this.defaults.markNear) || (nearBase != this.defaults.markNearBase) || (far != this.defaults.markFar)) {
+    const nv = new FieldValue(near);
+    const nbv = new FieldValue(nearBase);
+    const fv = new FieldValue(far);
+    if (!nv.compare(this.defaults.markNear) || !fv.compare(this.defaults.markFar) || !nbv.compare(this.defaults.markNearBase)) {
       this.clearFields();
     }
-    this.defaults.markNear = near;
-    this.defaults.markNearBase = nearBase;
-    this.defaults.markFar = far;
+    this.defaults.markNear = nv;
+    this.defaults.markNearBase = nbv;
+    this.defaults.markFar = fv;
   }
   jsonSetScriptLanguage(script, language) {
     this.script = script;
@@ -692,9 +753,19 @@ class FontForceField {
     if (!isAssigned(clusterOverlap))
       clusterOverlap = this.defaults.clusterOverlap;
     const gv = {};
-    if (isAssigned(far))  gv.far = far;
-    if (isAssigned(near)) gv.near = near;
-    if (isAssigned(nearBase)) gv.nearBase = nearBase;
+    const isMark = hbs.isGlyphMark(gid);
+    let nv = isMark ? this.defaults.markNear : this.defaults.baseNear;
+    let fv = isMark ? this.defaults.markFar : this.defaults.baseFar;
+    let nbv = this.defaults.markNearBase;
+    const gd = this.getGlyphData(gid);
+    if (gd) {
+      nv = gd.near;
+      fv = gd.far;
+      nbv = gd.nearBase;
+    }
+    gv.near = new FieldValue(near, nv);
+    gv.far  = new FieldValue(far,  fv);
+    gv.nearBase = new FieldValue(nearBase, nbv);
     if (isAssigned(clusterOverlap)) gv.clusterOverlap = clusterOverlap;
 
     this.addGlyphData(gid, gv);
@@ -802,6 +873,7 @@ class FontForceField {
       showFarBase=false,
       showFarMarks=false,
       showFarAll=true,
+      showIslands=false,
       showCollisions=true,
       showGlue=true,
       showBase=true,
@@ -821,6 +893,27 @@ class FontForceField {
       });
     Object.keys(ev.fields).forEach(k=>ev.fields[k].findBoundingBox());
 
+    if (showIslands) {
+      // Colour each island of the BASE far field (so a mark gluing two of them together
+      // is easy to spot). Islands made up of marks only (not touching the base far field)
+      // are added after them, with a heavier outline.
+      let n = 0;
+      const drawIsland = (isl, markOnly) => {
+        const col = ISLAND_COLORS[n++ % ISLAND_COLORS.length];
+        svg += isl.toSVG({fillColor:col, fillOpacity:0.2, strokeColor:col, strokeWidth:markOnly ? 30 : 12, strokeOpacity:fixedOpacity,});
+        isl.freePath();
+      };
+      ev.fields.overallFar.splitIslands(FAR_MIN_ISLAND_AREA).forEach(isl => drawIsland(isl, false));
+      ev.fields.overallAll.splitIslands(FAR_MIN_ISLAND_AREA).forEach(isl => {
+        const touch = isl.collisionCPath(ev.fields.overallFar);
+        if (touch) {
+          touch.freePath();
+          isl.freePath();
+        } else {
+          drawIsland(isl, true);
+        }
+      });
+    } else
     if (showFarAll) {
       svg += ev.fields.overallAll.toSVG({strokeColor:'#8af',strokeWidth:8,strokeOpacity:fixedOpacity,});
     }
@@ -837,7 +930,7 @@ class FontForceField {
     let y = 0;
     for (let idx=0; idx<ev.hb.length; idx++) {
       const e = ev.hb[idx];
-      const gf = hbg.getField(e.g);
+      const gf = hbg.ensureFields(e.g);
       const options = {};
 
       options.x = x + e.dx + (idx * stretch);

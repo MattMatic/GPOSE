@@ -160,6 +160,8 @@ button.action { font-size: 12px; padding: 4px 10px; }
 <script type="text/javascript" src="./js/jszip.min.js"></script>
 <script type="text/javascript" src="./js/FileSaver.min.js"></script>
 <script type="text/javascript" src="./js/textarea-mru.js"></script>
+<script type="text/javascript" src="./js/jsoneditor-panel.js"></script>
+<script type="text/javascript" src="./js/placement-panel.js"></script>
 
 <script type="module" async defer>
 'use strict';
@@ -223,7 +225,10 @@ function applyShapeResult(entry, r) {
 }
 
 function onFontOrJsonLoaded(jsonText) {
-  if (typeof jsonText === 'string') lastJsonText = jsonText;
+  if (typeof jsonText === 'string') {
+    lastJsonText = jsonText;
+    if (typeof JsonEditorPanel !== 'undefined') JsonEditorPanel.onExternalLoad(jsonText);
+  }
   maybeInitShapePool();
 }
 
@@ -231,6 +236,9 @@ window.getShapePool = getShapePool;
 window.applyShapeResult = applyShapeResult;
 window.restoreAttachmentPrototypes = restoreAttachmentPrototypes;
 window.onFontOrJsonLoaded = onFontOrJsonLoaded;
+window.getLastJsonText = () => lastJsonText;
+window.setLastJsonText = (t) => { lastJsonText = t; };
+window.reinitShapePool = maybeInitShapePool;
 
 const promises = [
   createHarfBuzz()
@@ -512,6 +520,7 @@ const svgOptions = {};
 //let currentEntry;
 const current = {
   entry: null,
+  ev: null,
   quality: -1,
   note: '',
 }
@@ -690,6 +699,28 @@ function showTrafficLights() {
     tdTLGood.style.backgroundColor = '';  
 }
 
+// Hover popup on the Kerning / Maybe lights: how many far-field islands the base glyphs make,
+// and what the marks do.
+function showIslandTip(e) {
+  const c = current.ev?.counts;
+  const base = c?.islandsBase?.fillCount;
+  const all  = c?.islandsAll?.fillCount;
+  if (!c || !(base >= 0) || !(all >= 0)) return hideIslandTip();
+  const markIslands = Math.max(0, all - base);
+  let html = `Base islands: <b>${base}</b>`;
+  html += `<br/>Mark islands: <b>${markIslands}</b>`;
+  if (c.glue > 0) html += `<br/>Marks glue: <b>${c.glue}</b>`;
+  divIslandTip.innerHTML = html;
+  const r = e.currentTarget.getBoundingClientRect();
+  divIslandTip.style.left = (r.right + 6) + 'px';
+  divIslandTip.style.top  = r.top + 'px';
+  divIslandTip.style.display = 'block';
+}
+
+function hideIslandTip() {
+  divIslandTip.style.display = 'none';
+}
+
 function delayedGlyphsShow() {  
   clearTimeout(glyphTimeout);
   renderSVG(true);
@@ -722,18 +753,24 @@ function renderSVG(full) {
   let hb = entry?.hb;
   if (!hb) return;
   current.entry = entry;
+  // While a JSON edit is previewed (not yet applied to all), evaluate every word shown live
+  const previewing = (typeof JsonEditorPanel !== 'undefined') && JsonEditorPanel.isPreviewing();
+  if (previewing) full = true;
   let svgRes;
   if (showBefore) {
     const resBefore = entry.toSVGBefore(wordList, svgOptions, evaluateOptionsFast);
     current.quality = resBefore.ev?.quality;
+    current.ev = resBefore.ev;
     svgRes = resBefore.svg;
     current.note = resBefore.note;
   } else {
     if (full) {
+      if (previewing) JsonEditorPanel.beforeEvaluate(entry);
       entry.evaluate(wordList, evaluateOptionsFast);
     }
     svgRes = entry.toSVG(wordList, svgOptions);
     current.quality = entry.getQuality();
+    current.ev = entry.ev;
     current.note = entry.note;
   }
   let svg = svgRes.svg;
@@ -774,6 +811,7 @@ function renderSVG(full) {
     tdTLKernMaybe.style.backgroundColor = '';
     tdTLGood.style.backgroundColor = '';        
   }
+  if (typeof PlacementPanel !== 'undefined') PlacementPanel.onRender();
 }
 
 function refreshSVG(e, n, forceUpdate) {
@@ -794,6 +832,7 @@ function refreshSVG(e, n, forceUpdate) {
 function updateRangeStretch(e) {
   svgOptions.stretch = rangeStretch.value;
   refreshSVG();
+  showTrafficLights();   // refreshSVG() clears them
 }
 
 function updateCheckBoxes(e) {
@@ -805,6 +844,7 @@ function updateCheckBoxes(e) {
   svgOptions.showFarBase=   cbFarBase.checked;
   svgOptions.showFarMarks=  cbFarMarks.checked;
   svgOptions.showFarAll=    cbFarAll.checked;
+  svgOptions.showIslands=   cbIslands.checked;
   svgOptions.showCollisions=cbCollisions.checked;
   svgOptions.showGlue=      cbGlue.checked;
   //svgOptions.showBefore=    cbBefore.checked;
@@ -812,6 +852,7 @@ function updateCheckBoxes(e) {
   svgOptions.showMark=      cbShowMark.checked;
   svgOptions.showBaseLine=  cbShowBaseLine.checked;
   refreshSVG();
+  showTrafficLights();   // refreshSVG() clears them
 }
 
 function updateRadioButtons(e) {
@@ -1987,6 +2028,7 @@ async function handleDropJSON(fileObject) {
   }
   catch(e) {
     ddJSONFileResult.innerHTML = `<font color='red'>${e}</font>`;
+    console.error(e);
     return;
   }
   fileObject.loaded = (jsonText && (jsonText.length > 0));
@@ -2760,6 +2802,8 @@ function buildPatternBins() {
 <input type='checkbox' id='cbOnlyEmpty'><label for='cbOnlyEmpty'>No Delta only</label></input>
 <button style='background-color:#fac;' id='btnSaveHB' onclick='saveHarfBuzzData({saveTxt:false, saveJson:true, saveJson5:false,saveFontInfo:true,});'>Save ZIP</button>
 <button style='background-color:#faa;' id='btnSaveDelta' onclick='saveDeltaFile();'>Save GPOSE Changes</button>
+<button id='btnJsonEditor' onclick='JsonEditorPanel.toggle();'>JSON Editor</button>
+<button id='btnPlacement' onclick='PlacementPanel.toggle();' title='Scatter plot of a glyph placement across the active list'>Placement</button>
 
 <table border=0 width="100%">
   <tr>
@@ -2838,6 +2882,9 @@ function buildPatternBins() {
     <td><input type='checkbox' id='cbGlue' checked><label for='cbGlue'>Glue</label></input></td>
     <td><input type='checkbox' id='cbBefore'><label for='cbBefore'>B<u>e</u>fore</label></input></td>
   </tr>
+  <tr>
+    <td colspan=3><input type='checkbox' id='cbIslands'><label for='cbIslands' title='Colour each far-field island separately. A heavy outline means the island is made of marks only.'>Islands</label></input></td>
+  </tr>
 </table>
     </td>
   </tr>
@@ -2860,6 +2907,7 @@ function buildPatternBins() {
       <tr><td id='tdTLKernMaybe'>&nbsp;Maybe&nbsp;</td></tr>
       <tr><td id='tdTLGood'>&nbsp;Good&nbsp;</td></tr>
     </table>
+    <div id='divIslandTip' style='display:none; position:fixed; z-index:900; background:#ffffe0; border:1px solid #888; padding:4px 8px; font-size:12px; pointer-events:none; white-space:nowrap;'></div>
   </div>
 </td>
 <td colspan=2>
@@ -2919,12 +2967,16 @@ function shortcutAddButton(ele, ks, fn) {
 }
 
 patchEventInput(updateRangeStretch, [rangeStretch]);
+[tdTLKernBad, tdTLKernMaybe].forEach(td => {
+  td.addEventListener('mouseenter', showIslandTip);
+  td.addEventListener('mouseleave', hideIslandTip);
+});
 patchEventInput(updateCheckBoxes,
   [
    cbGid, cbName,
    cbNear, cbNearBase,
    cbShowBaseLine,
-   cbFarBase, cbFarMarks, cbFarAll,
+   cbFarBase, cbFarMarks, cbFarAll, cbIslands,
    cbShowBase, cbShowMark, cbColored,
    cbCollisions, cbGlue,
   ]);
@@ -3015,7 +3067,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-10-13 1534
+<br/>2026-10-16 1025
 </body>
 
 

@@ -4,6 +4,18 @@ globalThis.scheduler.yield =
   globalThis.scheduler.yield ||
   (() => new Promise((r) => setTimeout(r, 0)));
 
+// Resolves after the browser has had a chance to paint. scheduler.yield() is not enough for this:
+// its continuation can run before the next frame, so work started straight after it (or worker
+// start-up) delays the first paint. rAF never fires in a hidden tab, hence the timeout fallback.
+function nextPaint() {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    requestAnimationFrame(() => setTimeout(finish, 0));
+    setTimeout(finish, 100);
+  });
+}
+
 class ProgressPanel {
   constructor(interval=32, func) {
     this._interval = interval;
@@ -57,8 +69,12 @@ class ProgressPanel {
     if (allowAbort) progress_panel_abort.hidden = false;
     progress_panel.style.display = 'block';
     this._timeout = setTimeout(() => { clearTimeout(this._timeout); }, 25);
-    await scheduler.yield(); // call this on return
+    await nextPaint(); // make sure the panel is on screen before the caller starts its work
     return true;
+  }
+  // Change the title while running (e.g. a slow set-up phase before the counting starts)
+  setMessage(message) {
+    progress_panel_title.innerText = message || '';
   }
   abort() {
     if (this.running)
