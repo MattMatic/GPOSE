@@ -1,5 +1,9 @@
 Changes
 -------
+# 2026-10-23
++ Added the "Proximity" panel - find words where two glyphs' outlines are closer or further than a gap you set (nearest distance and the X / Y offset between the nearest points), then Replace / Add / Subtract the Pattern List
++ Added js/glyph-query.js (GlyphQuery) and the console/ snippets built on it (nukta division, kasra check, outline distance)
+
 # 2026-10-20
 + Added the "Placement" panel - plots one glyph's dy/dx/ax (or absolute / base-relative dy) across the active list, grouped by context, to spot outliers; select bubbles to replace/add/subtract on the Pattern List or to generate a Bulk Apply pattern
 
