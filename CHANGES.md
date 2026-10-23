@@ -1,6 +1,7 @@
 Changes
 -------
 # 2026-10-23
++ JSON Editor: new "Test" button - evaluates the selected list under the edited JSON without changing anything, counts the words that move into / out of each bin, copies them to the clipboard, or replaces the Pattern List with them
 + Added the "Proximity" panel - find words where two glyphs' outlines are closer or further than a gap you set (nearest distance and the X / Y offset between the nearest points), then Replace / Add / Subtract the Pattern List
 + Added js/glyph-query.js (GlyphQuery) and the console/ snippets built on it (nukta division, kasra check, outline distance)
 

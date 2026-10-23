@@ -241,6 +241,7 @@ window.onFontOrJsonLoaded = onFontOrJsonLoaded;
 window.getLastJsonText = () => lastJsonText;
 window.setLastJsonText = (t) => { lastJsonText = t; };
 window.reinitShapePool = maybeInitShapePool;
+window.createShapePool = () => new ShapePool();   // a separate, temporary pool (the JSON editor's Test)
 
 const promises = [
   createHarfBuzz()
