@@ -1,20 +1,23 @@
 // Floating "Proximity" panel: find words where two glyphs' OUTLINES are close to (or far from) each other.
 //
 //  - Glyph 1 and Glyph 2: glyph-name patterns, as in Bulk Apply ('name', '/regexp/', leading '!' inverts).
-//  - Three values, each ignored or tested "<" / ">" a number (all tests must hold, AND):
-//      nearest distance         shortest outline-to-outline distance
+//  - Three values, each a "from" .. "to" range (blank = no limit on that side, both blank = ignored; all ranges must hold, AND):
+//      nearest distance         shortest outline-to-outline distance. Its "to" (default 600) is also the SEARCH RANGE: pairs
+//                               further apart than that are not measured and cannot match; leave it blank for no upper limit
 //      X component, Y component the signed offset from Glyph 1's nearest point to Glyph 2's nearest point
 //                               (font units, y up); "abs" tests the size instead of the signed value
 //  - Glyph 1 is the anchor. "Glyph 2 is" chooses which Glyph 2 it is compared with:
 //      first to the right   the first matching glyph after Glyph 1 in the word (the default)
 //      first to the left    the first matching glyph before it, looking leftwards
-//      nearest              the Glyph 2 with the smallest outline distance ("distance >" then means "nothing within that distance")
+//      nearest              the Glyph 2 with the smallest outline distance
 //      any                  every Glyph 1 / Glyph 2 pair
+//  - Only glyphs in DIFFERENT cursive runs are compared (a mark counts as part of the run of the base it is attached to),
+//    so "first to the right" skips Glyph 2 glyphs that are joined to Glyph 1.
 //  - Scans the list currently selected in the main window; Replace / Add / Subtract put the matching words in the
 //    Pattern List. Click a row to go to that word.
 //
-// Overlapping or nested outlines have distance 0 and X = Y = 0. Pairs further apart than "search range" count as far
-// away: they satisfy "distance >" but cannot satisfy an X or Y test.
+// Overlapping or nested outlines have distance 0 and X = Y = 0. With no distance "to", a pair further apart than the
+// search range still satisfies the distance test but cannot satisfy an X or Y range (their offsets are not measured).
 //
 // Relies on globals from index.html: wordList, setPatternList, refreshSVG, breadCrumbAdd, progressPanel, and
 // GlyphQuery (js/glyph-query.js).
@@ -28,7 +31,8 @@ const ProximityPanel = (() => {
   const q = (sel) => panel.querySelector(sel);
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  const FIELDS = ['g1', 'g2', 'pick', 'dist-op', 'dist-val', 'x-op', 'x-val', 'x-abs', 'y-op', 'y-val', 'y-abs', 'range'];
+  const FIELDS = ['g1', 'g2', 'pick', 'dist-from', 'dist-to', 'x-from', 'x-to', 'x-abs', 'y-from', 'y-to', 'y-abs'];
+  const DEFAULT_RANGE = 600;     // search range when the distance "to" is blank
 
   function css() {
     const style = document.createElement('style');
@@ -58,19 +62,27 @@ const ProximityPanel = (() => {
       #proximityPanel .px-pop { display:none; position:absolute; left:0; top:100%; margin-top:6px; width:330px; z-index:10;
         background:#ffd; border:1px solid #886; padding:6px 9px; box-shadow:0 2px 8px rgba(0,0,0,.3);
         font-size:12px; line-height:1.4; font-family:sans-serif; font-weight:normal; color:#222; white-space:normal; }
+      #proximityPanel table.px-form .px-pop { left:-150px; }
+      #proximityPanel table.px-form th { text-align:left; font-weight:normal; color:#666; font-size:11px; padding:0 4px; }
       #proximityPanel .px-hintbox:hover .px-pop, #proximityPanel .px-hintbox:focus-within .px-pop,
       #proximityPanel .px-hintbox.open .px-pop { display:block; }
     `;
     document.head.appendChild(style);
   }
 
-  function valueRow(key, label, hint, withAbs) {
+  // one range row: from / to boxes (blank = no limit), an optional abs tick and a hint. `extra` goes after the "to" box.
+  function valueRow(key, label, hint, withAbs, toDefault, extra = '') {
     return `<tr><td>${label}</td>
-      <td><select class='px-${key}-op'><option value='ignore'>ignore</option><option value='less'>less than</option><option value='greater'>greater than</option></select></td>
-      <td><input type='text' class='px-num px-${key}-val' value='0'></td>
+      <td><input type='text' class='px-num px-${key}-from' value='' placeholder='from' aria-label='${label} from'></td>
+      <td><span class='${extra ? 'px-hintbox' : ''}'><input type='text' class='px-num px-${key}-to' value='${toDefault}' placeholder='to' aria-label='${label} to'>${extra}</span></td>
       <td>${withAbs ? `<label title='Test the size, ignoring the sign'><input type='checkbox' class='px-${key}-abs'>abs</label>` : ''}</td>
       <td style='color:#666'>${hint}</td></tr>`;
   }
+  const RANGE_HINT = `<span class='px-hint' tabindex='0' role='button' aria-label='About the distance range'>?</span>
+    <span class='px-pop' id='pxRangeHint' role='tooltip'>
+      <b>Nearest distance</b> (font units). Blank = no limit on that side.<br>
+      The <b>to</b> value (default 600) is also the <b>search range</b>: only pairs whose outlines are that close are measured, so a smaller value is faster and a pair further apart never matches.<br>
+      Clear <b>to</b> to allow any distance: a pair further apart than 600 (or than <b>from</b>) still passes the distance test, but cannot pass an X or Y range because its offsets are not measured.</span>`;
 
   function build() {
     css();
@@ -87,20 +99,11 @@ const ProximityPanel = (() => {
             <option value='left'>the first match to the left of Glyph 1</option>
             <option value='nearest'>the nearest match (by outline distance)</option>
             <option value='any'>any match (every pair)</option></select></td></tr>
-          ${valueRow('dist', 'Nearest distance', 'font units', false)}
-          ${valueRow('x', 'X component', 'Glyph 2 minus Glyph 1; negative = Glyph 2 is left', true)}
-          ${valueRow('y', 'Y component', 'Glyph 2 minus Glyph 1; negative = Glyph 2 is below', true)}
+          <tr><th></th><th>from</th><th>to</th><th></th><th></th></tr>
+          ${valueRow('dist', 'Nearest distance', 'font units; "to" is the search range', false, DEFAULT_RANGE, RANGE_HINT)}
+          ${valueRow('x', 'X component', 'Glyph 2 minus Glyph 1; negative = Glyph 2 is left', true, '')}
+          ${valueRow('y', 'Y component', 'Glyph 2 minus Glyph 1; negative = Glyph 2 is below', true, '')}
         </table>
-        <div class='px-row-actions'>
-          <span class='px-hintbox'>Search range <input type='text' class='px-num px-range' value='600' aria-describedby='pxRangeHint'>
-            <span class='px-hint' tabindex='0' role='button' aria-label='About the search range'>?</span>
-            <span class='px-pop' id='pxRangeHint' role='tooltip'>
-              <b>Search range</b> (font units, default 600).<br>
-              Only pairs whose outlines are closer than this are measured exactly.<br>
-              A pair further apart counts as <i>far</i>: it satisfies <i>Nearest distance &gt;</i> but can never satisfy an X or Y test, because their offsets are not measured.<br>
-              A bigger range is slower. If <i>Nearest distance &gt; N</i> is set above the range, the range is stretched to N + 1.</span>
-          </span>
-        </div>
         <div class='px-row-actions'>
           <button type='button' class='px-scan' style='background-color:#afa;'>Scan</button>
           <span class='px-list'></span>
@@ -118,7 +121,8 @@ const ProximityPanel = (() => {
     q('.px-scan').onclick = scan;
     q('.px-hint').addEventListener('click', (e) => { e.currentTarget.parentElement.classList.toggle('open'); });   // touch / keyboard
     q('.px-hint').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } });
-    q('.px-range').addEventListener('input', () => q('.px-hintbox').classList.remove('open'));
+    q('.px-dist-to').addEventListener('input', () => q('.px-hintbox').classList.remove('open'));
+    q('.px-dist-to').setAttribute('aria-describedby', 'pxRangeHint');
     panel.querySelectorAll('.px-pl').forEach(b => { b.onclick = () => toPatternList(b.dataset.mode); });
     q('.px-results').addEventListener('click', (e) => {
       const tr = e.target.closest('tr.px-row');
@@ -169,34 +173,44 @@ const ProximityPanel = (() => {
   }
 
   // ---- the scan ---------------------------------------------------------------------------------------
-  // one value test: { op: 'ignore'|'less'|'greater', t: number, abs: bool }
-  function readCond(key, withAbs) {
-    const op = q(`.px-${key}-op`).value, t = parseFloat(q(`.px-${key}-val`).value);
-    if (op !== 'ignore' && isNaN(t)) throw new Error(`The ${key === 'dist' ? 'distance' : key.toUpperCase()} value is not a number.`);
-    return { op, t, abs: withAbs && q(`.px-${key}-abs`).checked };
+  // one range test: { from, to (null = no limit), abs }
+  const NAMES = { dist: 'distance', x: 'X', y: 'Y' };
+  function readRange(key, withAbs) {
+    const num = (cls) => {
+      const t = q(`.px-${key}-${cls}`).value.trim();
+      if (t === '') return null;
+      const n = Number(t);
+      if (isNaN(n)) throw new Error(`The ${NAMES[key]} "${cls}" value is not a number.`);
+      return n;
+    };
+    const r = { from: num('from'), to: num('to'), abs: withAbs && q(`.px-${key}-abs`).checked };
+    if (r.from !== null && r.to !== null && r.from > r.to) throw new Error(`The ${NAMES[key]} "from" is larger than its "to".`);
+    return r;
   }
+  const active = (c) => c.from !== null || c.to !== null;
   const passes = (c, v) => {
-    if (c.op === 'ignore') return true;
     const x = c.abs ? Math.abs(v) : v;
-    return c.op === 'less' ? x < c.t : x > c.t;
+    return (c.from === null || x >= c.from) && (c.to === null || x <= c.to);
   };
+  // the cursive run a glyph belongs to: a mark takes the run of the base it is attached to
+  const runOf = (g) => (g.mark && g.rootBase) ? g.rootBase.run : g.run;
 
   async function scan() {
     let m1, m2, cd, cx, cy;
     try {
       m1 = GlyphQuery.matcher(q('.px-g1').value); m2 = GlyphQuery.matcher(q('.px-g2').value);
       if (!m1 || !m2) throw new Error('Enter a pattern for both Glyph 1 and Glyph 2.');
-      cd = readCond('dist', false); cx = readCond('x', true); cy = readCond('y', true);
+      cd = readRange('dist', false); cx = readRange('x', true); cy = readRange('y', true);
     } catch (e) { setStatus(String(e.message ?? e), 'err'); return; }
     const pick = q('.px-pick').value;
-    let range = parseFloat(q('.px-range').value);
-    if (isNaN(range) || range <= 0) range = 600;
-    if (cd.op === 'greater') range = Math.max(range, cd.t + 1);       // must look at least as far as the threshold
-    const componentTest = cx.op !== 'ignore' || cy.op !== 'ignore';
+    // the distance "to" is the search range; with no "to", look at least as far as the default and the "from"
+    const range = cd.to !== null ? cd.to : Math.max(DEFAULT_RANGE, (cd.from ?? 0) + 1);
+    const limit = cd.to !== null ? cd.to + 0.001 : range;             // "to" itself is inside the range
+    const componentTest = active(cx) || active(cy);
 
-    // does this pair satisfy every active test? c = GlyphQuery.closest(...) or null (further than the range)
+    // does this pair satisfy every active range? c = GlyphQuery.closest(...) or null (further than the search range)
     const ok = (c) => {
-      if (!c) return cd.op !== 'less' && !componentTest;               // far away: only "distance >" can hold
+      if (!c) return cd.to === null && !componentTest;                // far away: only an open-ended distance can hold
       return passes(cd, c.d) && passes(cx, c.dx) && passes(cy, c.dy);
     };
 
@@ -212,12 +226,14 @@ const ProximityPanel = (() => {
         let best = null;
         for (const A of g1s) {
           // the Glyph 2 glyphs this Glyph 1 is compared with
+          const runA = runOf(A);
+          const others = g2s.filter(B => B !== A && runOf(B) !== runA);                          // only glyphs in other cursive runs
           let cands;
-          if (pick === 'right') cands = g2s.filter(B => B.i > A.i).slice(0, 1);                   // first after A in the word
-          else if (pick === 'left') cands = g2s.filter(B => B.i < A.i).slice(-1);                 // first before A, looking left
-          else cands = g2s.filter(B => B !== A);
+          if (pick === 'right') cands = others.filter(B => B.i > A.i).slice(0, 1);                // first after A in the word
+          else if (pick === 'left') cands = others.filter(B => B.i < A.i).slice(-1);              // first before A, looking left
+          else cands = others;
           if (!cands.length) continue;
-          let use = cands.map(B => ({ B, c: GlyphQuery.closest(A, B, range) }));
+          let use = cands.map(B => ({ B, c: GlyphQuery.closest(A, B, limit) }));
           if (pick === 'nearest') {
             const key = (r) => r.c ? r.c.d : 1e12 + GlyphQuery.boxDistance(A, r.B);               // out of range: nearest box first
             use = [use.reduce((p, r) => key(r) < key(p) ? r : p)];
@@ -227,7 +243,7 @@ const ProximityPanel = (() => {
             if (!best || (c ? c.d : Infinity) < best.d) {
               best = { d: c ? c.d : Infinity,
                        row: { glyph1: `#${A.i} ${A.name}`, glyph2: `#${B.i} ${B.name}`,
-                              distance: c ? Math.round(c.d * 10) / 10 : `>${Math.round(range)}`,
+                              distance: c ? Math.round(c.d * 10) / 10 : `>${Math.round(limit)}`,
                               x: c ? Math.round(c.dx) : '-', y: c ? Math.round(c.dy) : '-',
                               note: c && c.nested ? 'inside' : (c && c.d === 0 ? 'overlap' : '') } };
             }
