@@ -89,8 +89,9 @@ a **from** .. **to** range (blank = no limit on that side; both blank = ignored;
 signed X and Y offset between the nearest points (`abs` tests the size instead). The distance **to** (default 600) is also the search range.
 It scans the list selected in the main window and Replace / Add / Subtract put the matching words in the Pattern List.
 Glyph 1 is the anchor and "Glyph 2 is" picks which match it is compared with: the first to its right (default), the first to its left,
-the nearest by outline distance, or any (every pair). Only glyphs in **different cursive runs** are compared (a mark counts as part of the
-run of the base it is attached to). See the notes at the top of the file.
+the nearest by outline distance, or any (every pair). "Compare glyphs in" limits the Glyph 2 candidates to the same / different base glyph
+or the same / different cursive run (the default is different cursive runs); a mark counts as part of the run, and the base glyph, of the
+glyph it is attached to. See the notes at the top of the file.
 
 ## Notes for the snippets
 

@@ -12,8 +12,11 @@
 //      first to the left    the first matching glyph before it, looking leftwards
 //      nearest              the Glyph 2 with the smallest outline distance
 //      any                  every Glyph 1 / Glyph 2 pair
-//  - Only glyphs in DIFFERENT cursive runs are compared (a mark counts as part of the run of the base it is attached to),
-//    so "first to the right" skips Glyph 2 glyphs that are joined to Glyph 1.
+//  - "Compare glyphs in" limits which Glyph 2 glyphs are considered for a Glyph 1 (the default is different cursive runs, so
+//    "first to the right" skips glyphs that are joined to Glyph 1):
+//      different cursive runs / the same cursive run   a mark counts as part of the run of the base it is attached to
+//      different base glyphs / the same base glyph     the base glyph of a mark is the glyph it is attached to; any other
+//                                                      glyph (and a mark with no attachment) is its own base
 //  - Scans the list currently selected in the main window; Replace / Add / Subtract put the matching words in the
 //    Pattern List. Click a row to go to that word.
 //
@@ -32,7 +35,7 @@ const ProximityPanel = (() => {
   const q = (sel) => panel.querySelector(sel);
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  const FIELDS = ['g1', 'g2', 'pick', 'dist-from', 'dist-to', 'x-from', 'x-to', 'x-abs', 'y-from', 'y-to', 'y-abs'];
+  const FIELDS = ['g1', 'g2', 'pick', 'rel', 'dist-from', 'dist-to', 'x-from', 'x-to', 'x-abs', 'y-from', 'y-to', 'y-abs'];
   const DEFAULT_RANGE = 600;     // search range when the distance "to" is blank
 
   function css() {
@@ -100,6 +103,11 @@ const ProximityPanel = (() => {
             <option value='left'>the first match to the left of Glyph 1</option>
             <option value='nearest'>the nearest match (by outline distance)</option>
             <option value='any'>any match (every pair)</option></select></td></tr>
+          <tr><td>Compare glyphs in</td><td colspan='3'><select class='px-rel' title='Only Glyph 2 glyphs with this relation to Glyph 1 are considered'>
+            <option value='base-same'>the same base glyph</option>
+            <option value='base-diff'>different base glyphs</option>
+            <option value='run-same'>the same cursive run</option>
+            <option value='run-diff' selected>different cursive runs</option></select></td></tr>
           <tr><th></th><th>from</th><th>to</th><th></th><th></th></tr>
           ${valueRow('dist', 'Nearest distance', 'font units; "to" is the search range', false, DEFAULT_RANGE, RANGE_HINT)}
           ${valueRow('x', 'X component', 'Glyph 2 minus Glyph 1; negative = Glyph 2 is left', true, '')}
@@ -195,6 +203,14 @@ const ProximityPanel = (() => {
   };
   // the cursive run a glyph belongs to: a mark takes the run of the base it is attached to
   const runOf = (g) => (g.mark && g.rootBase) ? g.rootBase.run : g.run;
+  // the base glyph a glyph belongs to: the glyph a mark is attached to; any other glyph is its own base
+  const baseOf = (g) => (g.mark && g.rootBase) ? g.rootBase.i : g.i;
+  const RELATIONS = {
+    'run-diff':  (A, B) => runOf(A) !== runOf(B),
+    'run-same':  (A, B) => runOf(A) === runOf(B),
+    'base-diff': (A, B) => baseOf(A) !== baseOf(B),
+    'base-same': (A, B) => baseOf(A) === baseOf(B),
+  };
 
   async function scan() {
     let m1, m2, cd, cx, cy;
@@ -204,6 +220,7 @@ const ProximityPanel = (() => {
       cd = readRange('dist', false); cx = readRange('x', true); cy = readRange('y', true);
     } catch (e) { setStatus(String(e.message ?? e), 'err'); return; }
     const pick = q('.px-pick').value;
+    const related = RELATIONS[q('.px-rel').value] ?? RELATIONS['run-diff'];
     // the distance "to" is the search range; with no "to", look at least as far as the default and the "from"
     const range = cd.to !== null ? cd.to : Math.max(DEFAULT_RANGE, (cd.from ?? 0) + 1);
     const limit = cd.to !== null ? cd.to + 0.001 : range;             // "to" itself is inside the range
@@ -227,8 +244,7 @@ const ProximityPanel = (() => {
         let best = null;
         for (const A of g1s) {
           // the Glyph 2 glyphs this Glyph 1 is compared with
-          const runA = runOf(A);
-          const others = g2s.filter(B => B !== A && runOf(B) !== runA);                          // only glyphs in other cursive runs
+          const others = g2s.filter(B => B !== A && related(A, B));                               // only glyphs with the chosen relation
           let cands;
           if (pick === 'right') cands = others.filter(B => B.i > A.i).slice(0, 1);                // first after A in the word
           else if (pick === 'left') cands = others.filter(B => B.i < A.i).slice(-1);              // first before A, looking left
