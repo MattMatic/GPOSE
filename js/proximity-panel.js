@@ -2,11 +2,15 @@
 //
 //  - Glyph 1 and Glyph 2: glyph-name patterns, as in Bulk Apply ('name', '/regexp/', leading '!' inverts).
 //    A blank Glyph 1 or Glyph 2 means any glyph.
+//  - "Measure" chooses what the three values measure:
+//      outline nearest points   the outlines' shortest distance and the offset between their nearest points (the default)
+//      bounding boxes           the gap between the glyphs' boxes (0 when the boxes overlap) and the offset between the box
+//                               CENTRES - so the height order of two overlapping marks still shows in Y
 //  - Three values, each a "from" .. "to" range (blank = no limit on that side, both blank = ignored; all ranges must hold, AND):
 //      nearest distance         shortest outline-to-outline distance. Its "to" (default 600) is also the SEARCH RANGE: pairs
 //                               further apart than that are not measured and cannot match; leave it blank for no upper limit
-//      X component, Y component the signed offset from Glyph 1's nearest point to Glyph 2's nearest point
-//                               (font units, y up); "abs" tests the size instead of the signed value
+//      X component, Y component the signed offset from Glyph 1 to Glyph 2 (nearest point, or box centre; font units, y up);
+//                               "abs" tests the size instead of the signed value
 //  - Glyph 1 is the anchor. "Glyph 2 is" chooses which Glyph 2 it is compared with:
 //      first to the right   the first matching glyph after Glyph 1 in the word (the default)
 //      first to the left    the first matching glyph before it, looking leftwards
@@ -17,6 +21,7 @@
 //      different cursive runs / the same cursive run   a mark counts as part of the run of the base it is attached to
 //      different base glyphs / the same base glyph     the base glyph of a mark is the glyph it is attached to; any other
 //                                                      glyph (and a mark with no attachment) is its own base
+//      any (no restriction)                            every Glyph 2 is considered, whatever base or run it is in
 //  - Scans the list currently selected in the main window; Replace / Add / Subtract put the matching words in the
 //    Pattern List. Click a row to go to that word.
 //
@@ -35,7 +40,7 @@ const ProximityPanel = (() => {
   const q = (sel) => panel.querySelector(sel);
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  const FIELDS = ['g1', 'g2', 'pick', 'rel', 'dist-from', 'dist-to', 'x-from', 'x-to', 'x-abs', 'y-from', 'y-to', 'y-abs'];
+  const FIELDS = ['g1', 'g2', 'pick', 'rel', 'measure', 'dist-from', 'dist-to', 'x-from', 'x-to', 'x-abs', 'y-from', 'y-to', 'y-abs'];
   const DEFAULT_RANGE = 600;     // search range when the distance "to" is blank
 
   function css() {
@@ -107,7 +112,11 @@ const ProximityPanel = (() => {
             <option value='base-same'>the same base glyph</option>
             <option value='base-diff'>different base glyphs</option>
             <option value='run-same'>the same cursive run</option>
-            <option value='run-diff' selected>different cursive runs</option></select></td></tr>
+            <option value='run-diff' selected>different cursive runs</option>
+            <option value='any'>any (no restriction)</option></select></td></tr>
+          <tr><td>Measure</td><td colspan='3'><select class='px-measure' title='What distance, X and Y measure. Bounding boxes: the box gap (0 when the boxes overlap) and the offset between the box centres, so two overlapping marks still have a height order.'>
+            <option value='outline' selected>outline nearest points</option>
+            <option value='box'>bounding boxes (centres)</option></select></td></tr>
           <tr><th></th><th>from</th><th>to</th><th></th><th></th></tr>
           ${valueRow('dist', 'Nearest distance', 'font units; "to" is the search range', false, DEFAULT_RANGE, RANGE_HINT)}
           ${valueRow('x', 'X component', 'Glyph 2 minus Glyph 1; negative = Glyph 2 is left', true, '')}
@@ -210,6 +219,7 @@ const ProximityPanel = (() => {
     'run-same':  (A, B) => runOf(A) === runOf(B),
     'base-diff': (A, B) => baseOf(A) !== baseOf(B),
     'base-same': (A, B) => baseOf(A) === baseOf(B),
+    'any':       () => true,
   };
 
   async function scan() {
@@ -221,10 +231,20 @@ const ProximityPanel = (() => {
     } catch (e) { setStatus(String(e.message ?? e), 'err'); return; }
     const pick = q('.px-pick').value;
     const related = RELATIONS[q('.px-rel').value] ?? RELATIONS['run-diff'];
+    const boxMode = q('.px-measure').value === 'box';
     // the distance "to" is the search range; with no "to", look at least as far as the default and the "from"
     const range = cd.to !== null ? cd.to : Math.max(DEFAULT_RANGE, (cd.from ?? 0) + 1);
     const limit = cd.to !== null ? cd.to + 0.001 : range;             // "to" itself is inside the range
     const componentTest = active(cx) || active(cy);
+
+    // distance, X and Y of a pair, or null if they are further apart than the search range
+    const measurePair = (A, B) => {
+      if (!boxMode) return GlyphQuery.closest(A, B, limit);
+      const d = GlyphQuery.boxDistance(A, B);
+      if (!(d < limit)) return null;
+      const a = A.box, b = B.box;
+      return { d, dx: (b.x0 + b.x1) / 2 - (a.x0 + a.x1) / 2, dy: (b.y0 + b.y1) / 2 - (a.y0 + a.y1) / 2, nested: null };
+    };
 
     // does this pair satisfy every active range? c = GlyphQuery.closest(...) or null (further than the search range)
     const ok = (c) => {
@@ -250,7 +270,7 @@ const ProximityPanel = (() => {
           else if (pick === 'left') cands = others.filter(B => B.i < A.i).slice(-1);              // first before A, looking left
           else cands = others;
           if (!cands.length) continue;
-          let use = cands.map(B => ({ B, c: GlyphQuery.closest(A, B, limit) }));
+          let use = cands.map(B => ({ B, c: measurePair(A, B) }));
           if (pick === 'nearest') {
             const key = (r) => r.c ? r.c.d : 1e12 + GlyphQuery.boxDistance(A, r.B);               // out of range: nearest box first
             use = [use.reduce((p, r) => key(r) < key(p) ? r : p)];
