@@ -7,7 +7,7 @@
 //    temporary worker pool and only records which words would change quality. It shows
 //    how many words move into / out of each bin, can copy the changes to the clipboard
 //    (summary, then "word <TAB> change" per line) and can replace the Pattern List with
-//    the changed words.
+//    the changed words. The summary has a close button; Test brings it back.
 //  - "Apply to all" pushes the JSON to the worker pool, re-evaluates every word
 //    (deltas are kept) and rebuilds the Collision/Near/Kerning/Maybe bins.
 //  - "Download" saves the text as a .json file.
@@ -90,6 +90,9 @@ const JsonEditorPanel = (() => {
       #jsonEditorPanel .jep-results th, #jsonEditorPanel .jep-results td { padding:1px 10px; text-align:right; border-bottom:1px solid #dde; }
       #jsonEditorPanel .jep-results th:first-child, #jsonEditorPanel .jep-results td:first-child { text-align:left; }
       #jsonEditorPanel .jep-results .jep-stale { color:#a60; }
+      #jsonEditorPanel .jep-results .jep-sumrow { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+      #jsonEditorPanel .jep-results .jep-closeres { border:0; background:transparent; font-size:18px; line-height:1; cursor:pointer; color:#555; padding:0 2px; }
+      #jsonEditorPanel .jep-results .jep-closeres:hover { color:#c00; }
       #jsonEditorPanel .jep-results .jep-acts { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:3px; }
     `;
     document.head.appendChild(style);
@@ -124,6 +127,7 @@ const JsonEditorPanel = (() => {
     panel.querySelector('.jep-results').addEventListener('click', (e) => {
       if (e.target.closest('.jep-copy')) copyResults();
       else if (e.target.closest('.jep-pl')) replacePatternList();
+      else if (e.target.closest('.jep-closeres')) closeResults();
     });
     ta.addEventListener('input', () => {
       clearTimeout(timer);
@@ -344,11 +348,14 @@ const JsonEditorPanel = (() => {
   function showResults() {
     const box = panel.querySelector('.jep-results');
     const r = testResult;
-    if (!r) { box.hidden = true; return; }
+    if (!r) { box.hidden = true; box.innerHTML = ''; return; }
     const sign = (n) => (n > 0 ? '+' : '') + n;
     const rows = BIN_ORDER.map(q => `<tr><td>${QNAMES[q]}</td><td>${r.bins[q].in}</td><td>${r.bins[q].out}</td><td>${sign(r.bins[q].in - r.bins[q].out)}</td></tr>`).join('');
     box.innerHTML = `
-      <div><b>Test of the ${r.list} list:</b> ${r.changes.length} of ${r.tested} words change rating (${r.better} better, ${r.worse} worse)</div>
+      <div class='jep-sumrow'>
+        <div><b>Test of the ${r.list} list:</b> ${r.changes.length} of ${r.tested} words change rating (${r.better} better, ${r.worse} worse)</div>
+        <button type='button' class='jep-closeres' title='Close this summary (Test shows it again)' aria-label='Close summary'>&times;</button>
+      </div>
       <div class='jep-stale' hidden>The JSON has been edited since this test.</div>
       <table><tr><th>Bin</th><th>moves in</th><th>moves out</th><th>net</th></tr>${rows}</table>
       <div class='jep-acts'>
@@ -357,6 +364,13 @@ const JsonEditorPanel = (() => {
       </div>`;
     box.hidden = false;
     markResultsStale();
+  }
+
+  // Dismiss the summary (and forget the results); running Test again brings it back
+  function closeResults() {
+    testResult = null;
+    showResults();
+    updateStaleStatus();
   }
 
   // The results describe the text that was tested; say so when the text has moved on
