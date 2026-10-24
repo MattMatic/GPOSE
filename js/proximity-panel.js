@@ -104,7 +104,7 @@ const ProximityPanel = (() => {
           <tr><td>Glyph 1</td><td colspan='3'><input type='text' class='px-glyph px-g1' spellcheck='false' placeholder="blank = any glyph; or name, /regexp/, !name"></td></tr>
           <tr><td>Glyph 2</td><td colspan='3'><input type='text' class='px-glyph px-g2' spellcheck='false' placeholder="blank = any glyph; or name, /regexp/, !name"></td></tr>
           <tr><td>Glyph 2 is</td><td colspan='3'><select class='px-pick' title='Which matching Glyph 2 is compared with Glyph 1 (the anchor)'>
-            <option value='right'>the first match to the right of Glyph 1</option>
+            <option value='right' selected>the first match to the right of Glyph 1 (default)</option>
             <option value='left'>the first match to the left of Glyph 1</option>
             <option value='nearest'>the nearest match (by outline distance)</option>
             <option value='any'>any match (every pair)</option></select></td></tr>
@@ -112,13 +112,13 @@ const ProximityPanel = (() => {
             <option value='base-same'>the same base glyph</option>
             <option value='base-diff'>different base glyphs</option>
             <option value='run-same'>the same cursive run</option>
-            <option value='run-diff' selected>different cursive runs</option>
+            <option value='run-diff' selected>different cursive runs (default)</option>
             <option value='any'>any (no restriction)</option></select></td></tr>
           <tr><td>Measure</td><td colspan='3'><select class='px-measure' title='What distance, X and Y measure. Bounding boxes: the box gap (0 when the boxes overlap) and the offset between the box centres, so two overlapping marks still have a height order.'>
-            <option value='outline' selected>outline nearest points</option>
+            <option value='outline' selected>outline nearest points (default)</option>
             <option value='box'>bounding boxes (centres)</option></select></td></tr>
           <tr><th></th><th>from</th><th>to</th><th></th><th></th></tr>
-          ${valueRow('dist', 'Nearest distance', 'font units; "to" is the search range', false, DEFAULT_RANGE, RANGE_HINT)}
+          ${valueRow('dist', 'Nearest distance', 'font units; "to" is the search range (default 600)', false, DEFAULT_RANGE, RANGE_HINT)}
           ${valueRow('x', 'X component', 'Glyph 2 minus Glyph 1; negative = Glyph 2 is left', true, '')}
           ${valueRow('y', 'Y component', 'Glyph 2 minus Glyph 1; negative = Glyph 2 is below', true, '')}
         </table>
