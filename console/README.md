@@ -90,8 +90,11 @@ signed X and Y offset between the nearest points (`abs` tests the size instead).
 It scans the list selected in the main window and Replace / Add / Subtract put the matching words in the Pattern List.
 Glyph 1 is the anchor and "Glyph 2 is" picks which match it is compared with: the first to its right (default), the first to its left,
 the nearest by outline distance, or any (every pair). "Compare glyphs in" limits the Glyph 2 candidates to the same / different base glyph
-or the same / different cursive run (the default is different cursive runs); a mark counts as part of the run, and the base glyph, of the
-glyph it is attached to. See the notes at the top of the file.
+or the same / different cursive run (the default is different cursive runs), or no restriction; a mark counts as part of the run, and the base glyph, of the
+glyph it is attached to. "Measure" switches the three values between the outlines' nearest points and the glyphs' bounding boxes
+(box gap, and the offset between the box centres, so two overlapping marks still have a height order - the kasra check can be set up
+this way: Glyph 1 `/^KASRA/`, Glyph 2 `/^(sdb|ddb|tdb)/`, any match, "any (no restriction)" - or the same base glyph, to match the
+snippet's `SAME = 'base'` - Y to -1, X `abs` to the snippet's `MAX_X_MID`). See the notes at the top of the file.
 
 ## Notes for the snippets
 
