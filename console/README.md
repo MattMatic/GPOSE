@@ -84,7 +84,7 @@ Use it to choose thresholds from real data (see `outline-distance.js`).
 
 ## The Proximity panel
 
-The **Proximity** button opens a floating panel built on `GlyphQuery.closest` (`js/proximity-panel.js`): two glyph patterns, then
+The **Proximity** button opens a floating panel built on `GlyphQuery.closest` (`js/proximity-panel.js`): two glyph patterns (blank = any glyph), then
 a **from** .. **to** range (blank = no limit on that side; both blank = ignored; all ranges must hold) for the nearest distance and for the
 signed X and Y offset between the nearest points (`abs` tests the size instead). The distance **to** (default 600) is also the search range.
 It scans the list selected in the main window and Replace / Add / Subtract put the matching words in the Pattern List.

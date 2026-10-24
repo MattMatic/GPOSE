@@ -1,6 +1,7 @@
 // Floating "Proximity" panel: find words where two glyphs' OUTLINES are close to (or far from) each other.
 //
 //  - Glyph 1 and Glyph 2: glyph-name patterns, as in Bulk Apply ('name', '/regexp/', leading '!' inverts).
+//    A blank Glyph 1 or Glyph 2 means any glyph.
 //  - Three values, each a "from" .. "to" range (blank = no limit on that side, both blank = ignored; all ranges must hold, AND):
 //      nearest distance         shortest outline-to-outline distance. Its "to" (default 600) is also the SEARCH RANGE: pairs
 //                               further apart than that are not measured and cannot match; leave it blank for no upper limit
@@ -45,7 +46,7 @@ const ProximityPanel = (() => {
       #proximityPanel .px-body { flex:1; overflow:auto; padding:6px 8px; display:flex; flex-direction:column; gap:6px; }
       #proximityPanel table.px-form td { padding:2px 4px; }
       #proximityPanel input[type=text] { font-family:monospace; }
-      #proximityPanel .px-glyph { width:210px; }
+      #proximityPanel .px-glyph { width:290px; }
       #proximityPanel .px-num { width:60px; }
       #proximityPanel .px-status { font-size:12px; color:#444; }
       #proximityPanel .px-status.err { color:#c00; }
@@ -92,8 +93,8 @@ const ProximityPanel = (() => {
       <div class='px-head'><span>Glyph proximity</span><button type='button' class='px-close' aria-label='close'>X</button></div>
       <div class='px-body'>
         <table class='px-form'>
-          <tr><td>Glyph 1</td><td colspan='3'><input type='text' class='px-glyph px-g1' spellcheck='false' placeholder="name, /regexp/ or !name"></td></tr>
-          <tr><td>Glyph 2</td><td colspan='3'><input type='text' class='px-glyph px-g2' spellcheck='false' placeholder="name, /regexp/ or !name"></td></tr>
+          <tr><td>Glyph 1</td><td colspan='3'><input type='text' class='px-glyph px-g1' spellcheck='false' placeholder="blank = any glyph; or name, /regexp/, !name"></td></tr>
+          <tr><td>Glyph 2</td><td colspan='3'><input type='text' class='px-glyph px-g2' spellcheck='false' placeholder="blank = any glyph; or name, /regexp/, !name"></td></tr>
           <tr><td>Glyph 2 is</td><td colspan='3'><select class='px-pick' title='Which matching Glyph 2 is compared with Glyph 1 (the anchor)'>
             <option value='right'>the first match to the right of Glyph 1</option>
             <option value='left'>the first match to the left of Glyph 1</option>
@@ -198,8 +199,8 @@ const ProximityPanel = (() => {
   async function scan() {
     let m1, m2, cd, cx, cy;
     try {
-      m1 = GlyphQuery.matcher(q('.px-g1').value); m2 = GlyphQuery.matcher(q('.px-g2').value);
-      if (!m1 || !m2) throw new Error('Enter a pattern for both Glyph 1 and Glyph 2.');
+      m1 = GlyphQuery.matcher(q('.px-g1').value) ?? (() => true);     // blank = any glyph
+      m2 = GlyphQuery.matcher(q('.px-g2').value) ?? (() => true);
       cd = readRange('dist', false); cx = readRange('x', true); cy = readRange('y', true);
     } catch (e) { setStatus(String(e.message ?? e), 'err'); return; }
     const pick = q('.px-pick').value;
