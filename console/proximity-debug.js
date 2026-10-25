@@ -74,7 +74,7 @@
     if (index < 0 || !wordList.get(index)) { rows.push({ word, verdict: 'word not in the word list' }); continue; }
     const w = GlyphQuery.placed(index);
     const names = w.glyphs.map(g => g.name).join(' ');
-    const g1s = w.glyphs.filter(g => g.outline && m1(g.name)), g2s = w.glyphs.filter(g => g.outline && m2(g.name));
+    const g1s = w.glyphs.filter(g => g.outline && m1(g.name, g.mark)), g2s = w.glyphs.filter(g => g.outline && m2(g.name, g.mark));
     if (!g1s.length || !g2s.length) {
       rows.push({ word, verdict: !g1s.length ? 'no Glyph 1 matches' : 'no Glyph 2 matches', glyphsInWord: names });
       continue;

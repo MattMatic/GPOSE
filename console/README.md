@@ -73,7 +73,7 @@ or an array of word indices.
 | `GlyphQuery.overlaps(a, b)` | outlines cross, touch or nest |
 | `GlyphQuery.clearance(n, others, { dir, axis, look, stopAt })` | how far `n` can slide before touching one of `others`: left (`dir: -1`) / right (`+1`) along x, or with `axis: 'y'` down (`-1`) / up (`+1`); `{ d, by }` (`d = Infinity` if free). Only glyphs in `n`'s lane (its height for x, its width for y) within `look` units are considered |
 
-**Nearest points** - `GlyphQuery.closest(a, b, limit)` returns `{ d, a: {x,y}, b: {x,y}, dx, dy, touching, nested }` for the nearest points of two glyph outlines (`dx`, `dy` = point on b minus point on a, signed, y up), or `null` if they are further apart than `limit`. Crossing, touching and nested outlines have `d = 0` and `dx = dy = 0` (`nested` is `'a'` or `'b'` when one is inside the other). `GlyphQuery.matcher('name' | '/re/' | '!name')` is the Bulk Apply style glyph-name test used by the Proximity panel.
+**Nearest points** - `GlyphQuery.closest(a, b, limit)` returns `{ d, a: {x,y}, b: {x,y}, dx, dy, touching, nested }` for the nearest points of two glyph outlines (`dx`, `dy` = point on b minus point on a, signed, y up), or `null` if they are further apart than `limit`. Crossing, touching and nested outlines have `d = 0` and `dx = dy = 0` (`nested` is `'a'` or `'b'` when one is inside the other). `GlyphQuery.matcher('name' | '/re/' | '~' | '!...')` is the Bulk Apply style glyph test used by the Proximity panel (`~` is any mark; call the test as `test(name, isMark)`).
 
 **Inspecting** - `GlyphQuery.describe(word)` prints a table of every glyph in a word (placed position, box, base it is attached to, cursive run, delta). `word` can be the text, an index, or nothing for the displayed word. Use it first when a snippet finds nothing you expect.
 
@@ -84,7 +84,7 @@ Use it to choose thresholds from real data (see `outline-distance.js`).
 
 ## The Proximity panel
 
-The **Proximity** button opens a floating panel built on `GlyphQuery.closest` (`js/proximity-panel.js`): two glyph patterns (blank = any glyph), then
+The **Proximity** button opens a floating panel built on `GlyphQuery.closest` (`js/proximity-panel.js`): two glyph patterns (blank = any glyph, `~` = any mark, `!~` = any glyph that is not a mark), then
 a **from** .. **to** range (blank = no limit on that side; both blank = ignored; all ranges must hold) for the nearest distance and for the
 signed X and Y offset between the nearest points (`abs` tests the size instead). The distance **to** (default 600) is also the search range.
 It scans the list selected in the main window and Replace / Add / Subtract put the matching words in the Pattern List.
@@ -94,7 +94,7 @@ or the same / different cursive run (the default is different cursive runs), or 
 glyph it is attached to. "Measure" switches the three values between the outlines' nearest points and the glyphs' bounding boxes
 (box gap, and the offset between the box centres, so two overlapping marks still have a height order - the kasra check can be set up
 this way: Glyph 1 `/^KASRA/`, Glyph 2 `/^(sdb|ddb|tdb)/`, any match, "any (no restriction)" - or the same base glyph, to match the
-snippet's `SAME = 'base'` - Y to -1, X `abs` to the snippet's `MAX_X_MID`). See the notes at the top of the file.
+snippet's `SAME = 'base'` - Y to -1, X `abs` to the snippet's `MAX_X_MID`). The **Defaults** button puts every setting back to its default and forgets the saved settings. See the notes at the top of the file.
 
 ## Notes for the snippets
 
