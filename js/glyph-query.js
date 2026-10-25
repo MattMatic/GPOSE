@@ -254,8 +254,9 @@ const GlyphQuery = (() => {
     };
   };
   /**
-   * A glyph-name matcher in the Bulk Apply style: 'name' (exact), '/regexp/' (tested against the name), and a leading
-   * '!' inverts either. Empty text gives null. Throws on a bad regexp.
+   * A glyph matcher in the Bulk Apply style: 'name' (exact), '/regexp/' (tested against the name) or '~' (any mark glyph:
+   * the font's mark class), and a leading '!' inverts any of them ('!~' = any glyph that is not a mark). Empty text gives
+   * null. Throws on a bad regexp. The returned test is called as test(name, isMark); '~' needs isMark (a PlacedGlyph's .mark).
    */
   function matcher(text) {
     text = (text ?? '').trim();
@@ -263,9 +264,10 @@ const GlyphQuery = (() => {
     let invert = false;
     if (text[0] === '!') { invert = true; text = text.slice(1); }
     let test;
-    if (text.length > 2 && text[0] === '/' && text.endsWith('/')) { const re = new RegExp(text.slice(1, -1), 'u'); test = (n) => re.test(n); }
+    if (text === '~') test = (n, isMark) => !!isMark;
+    else if (text.length > 2 && text[0] === '/' && text.endsWith('/')) { const re = new RegExp(text.slice(1, -1), 'u'); test = (n) => re.test(n); }
     else test = (n) => n === text;
-    return invert ? (n) => !test(n) : test;
+    return invert ? (n, isMark) => !test(n, isMark) : test;
   }
   const overlaps = (a, b) => !!(a.outline && b.outline) && outlinesOverlap(a.outline, a.px, a.py, b.outline, b.px, b.py);
   /** gap between the two glyphs' bounding boxes (0 if they overlap) */

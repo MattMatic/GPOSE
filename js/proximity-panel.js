@@ -1,7 +1,7 @@
 // Floating "Proximity" panel: find words where two glyphs' OUTLINES are close to (or far from) each other.
 //
 //  - Glyph 1 and Glyph 2: glyph-name patterns, as in Bulk Apply ('name', '/regexp/', leading '!' inverts).
-//    A blank Glyph 1 or Glyph 2 means any glyph.
+//    '~' means any mark (the font's mark class) and '!~' any glyph that is not a mark. A blank Glyph 1 or Glyph 2 means any glyph.
 //  - "Measure" chooses what the three values measure:
 //      outline nearest points   the outlines' shortest distance and the offset between their nearest points (the default)
 //      bounding boxes           the gap between the glyphs' boxes (0 when the boxes overlap) and the offset between the box
@@ -42,6 +42,7 @@ const ProximityPanel = (() => {
 
   const FIELDS = ['g1', 'g2', 'pick', 'rel', 'measure', 'dist-from', 'dist-to', 'x-from', 'x-to', 'x-abs', 'y-from', 'y-to', 'y-abs'];
   const DEFAULT_RANGE = 600;     // search range when the distance "to" is blank
+  let defaults = null;           // every field's starting value, read from the freshly built form
 
   function css() {
     const style = document.createElement('style');
@@ -72,6 +73,8 @@ const ProximityPanel = (() => {
         background:#ffd; border:1px solid #886; padding:6px 9px; box-shadow:0 2px 8px rgba(0,0,0,.3);
         font-size:12px; line-height:1.4; font-family:sans-serif; font-weight:normal; color:#222; white-space:normal; }
       #proximityPanel table.px-form .px-pop { left:-150px; }
+      #proximityPanel table.px-form .px-gl .px-pop { left:0; }
+      #proximityPanel .px-pop code { font-family:monospace; background:#eed; padding:0 3px; }
       #proximityPanel table.px-form th { text-align:left; font-weight:normal; color:#666; font-size:11px; padding:0 4px; }
       #proximityPanel .px-hintbox:hover .px-pop, #proximityPanel .px-hintbox:focus-within .px-pop,
       #proximityPanel .px-hintbox.open .px-pop { display:block; }
@@ -87,6 +90,14 @@ const ProximityPanel = (() => {
       <td>${withAbs ? `<label title='Test the size, ignoring the sign'><input type='checkbox' class='px-${key}-abs'>abs</label>` : ''}</td>
       <td style='color:#666'>${hint}</td></tr>`;
   }
+  const glyphHint = (id) => `<span class='px-hint' tabindex='0' role='button' aria-label='About glyph patterns'>?</span>
+    <span class='px-pop' id='${id}' role='tooltip'>
+      <b>Glyph pattern</b> - the same rules as Bulk Apply.<br>
+      <b>blank</b> = any glyph<br>
+      <code>sdb.one</code> an exact glyph name<br>
+      <code>/^(sdb|ddb|tdb)/</code> a regular expression, tested against the glyph name<br>
+      <code>~</code> any mark (the font's mark class)<br>
+      A leading <code>!</code> inverts: <code>!~</code> any glyph that is not a mark, <code>!/^BE/</code> anything not starting with BE.</span>`;
   const RANGE_HINT = `<span class='px-hint' tabindex='0' role='button' aria-label='About the distance range'>?</span>
     <span class='px-pop' id='pxRangeHint' role='tooltip'>
       <b>Nearest distance</b> (font units). Blank = no limit on that side.<br>
@@ -101,8 +112,8 @@ const ProximityPanel = (() => {
       <div class='px-head'><span>Glyph proximity</span><button type='button' class='px-close' aria-label='close'>X</button></div>
       <div class='px-body'>
         <table class='px-form'>
-          <tr><td>Glyph 1</td><td colspan='3'><input type='text' class='px-glyph px-g1' spellcheck='false' placeholder="blank = any glyph; or name, /regexp/, !name"></td></tr>
-          <tr><td>Glyph 2</td><td colspan='3'><input type='text' class='px-glyph px-g2' spellcheck='false' placeholder="blank = any glyph; or name, /regexp/, !name"></td></tr>
+          <tr><td>Glyph 1</td><td colspan='3'><span class='px-hintbox px-gl'><input type='text' class='px-glyph px-g1' spellcheck='false' aria-describedby='pxGlyphHint1' placeholder="blank = any glyph (? for help)"> ${glyphHint('pxGlyphHint1')}</span></td></tr>
+          <tr><td>Glyph 2</td><td colspan='3'><span class='px-hintbox px-gl'><input type='text' class='px-glyph px-g2' spellcheck='false' aria-describedby='pxGlyphHint2' placeholder="blank = any glyph (? for help)"> ${glyphHint('pxGlyphHint2')}</span></td></tr>
           <tr><td>Glyph 2 is</td><td colspan='3'><select class='px-pick' title='Which matching Glyph 2 is compared with Glyph 1 (the anchor)'>
             <option value='right' selected>the first match to the right of Glyph 1 (default)</option>
             <option value='left'>the first match to the left of Glyph 1</option>
@@ -124,6 +135,7 @@ const ProximityPanel = (() => {
         </table>
         <div class='px-row-actions'>
           <button type='button' class='px-scan' style='background-color:#afa;'>Scan</button>
+          <button type='button' class='px-defaults' title='Put every setting back to its default and forget the saved settings'>Defaults</button>
           <span class='px-list'></span>
         </div>
         <div class='px-status'></div>
@@ -137,9 +149,14 @@ const ProximityPanel = (() => {
     document.body.appendChild(panel);
     q('.px-close').onclick = hide;
     q('.px-scan').onclick = scan;
-    q('.px-hint').addEventListener('click', (e) => { e.currentTarget.parentElement.classList.toggle('open'); });   // touch / keyboard
-    q('.px-hint').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } });
-    q('.px-dist-to').addEventListener('input', () => q('.px-hintbox').classList.remove('open'));
+    q('.px-defaults').onclick = resetDefaults;
+    panel.querySelectorAll('.px-hint').forEach(h => {                       // hover / focus show a hint; click or Enter pins it (touch, keyboard)
+      h.addEventListener('click', (e) => { e.currentTarget.parentElement.classList.toggle('open'); });
+      h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } });
+    });
+    for (const f of ['.px-g1', '.px-g2', '.px-dist-to']) {                  // typing in a field closes its hint
+      q(f).addEventListener('input', () => q(f).closest('.px-hintbox').classList.remove('open'));
+    }
     q('.px-dist-to').setAttribute('aria-describedby', 'pxRangeHint');
     panel.querySelectorAll('.px-pl').forEach(b => { b.onclick = () => toPatternList(b.dataset.mode); });
     q('.px-results').addEventListener('click', (e) => {
@@ -148,7 +165,9 @@ const ProximityPanel = (() => {
     });
     panel.addEventListener('input', saveForm);
     panel.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('input[type=text]')) scan(); });
-    loadForm();
+    defaults = {};                                                       // the form as built is the defaults ...
+    for (const f of FIELDS) { const el = q('.px-' + f); defaults[f] = el.type === 'checkbox' ? el.checked : el.value; }
+    loadForm();                                                          // ... then the saved settings are put on top
     makeDraggable(panel, q('.px-head'));
   }
 
@@ -182,6 +201,17 @@ const ProximityPanel = (() => {
       if (!o) return;
       for (const f of FIELDS) { const el = q('.px-' + f); if (el && f in o) { if (el.type === 'checkbox') el.checked = !!o[f]; else el.value = o[f]; } }
     } catch (e) { /* ignore */ }
+  }
+
+  // Every setting back to its default; the saved copy is forgotten (the results are left as they are)
+  function resetDefaults() {
+    for (const f of FIELDS) {
+      const el = q('.px-' + f);
+      if (el.type === 'checkbox') el.checked = defaults[f]; else el.value = defaults[f];
+    }
+    panel.querySelectorAll('.px-hintbox.open').forEach(b => b.classList.remove('open'));
+    try { window.localStorage.removeItem(LS_KEY); } catch (e) { /* storage unavailable */ }
+    setStatus('All settings are back to their defaults.');
   }
 
   function setStatus(msg, cls = '') {
@@ -257,9 +287,9 @@ const ProximityPanel = (() => {
     const res = await GlyphQuery.scan({
       title: 'Proximity', list: listKey, apply: false, quiet: true,
       test: (w) => {
-        const g1s = w.glyphs.filter(g => g.outline && m1(g.name));
+        const g1s = w.glyphs.filter(g => g.outline && m1(g.name, g.mark));
         if (!g1s.length) return null;
-        const g2s = w.glyphs.filter(g => g.outline && m2(g.name));
+        const g2s = w.glyphs.filter(g => g.outline && m2(g.name, g.mark));
         if (!g2s.length) return null;
         let best = null;
         for (const A of g1s) {

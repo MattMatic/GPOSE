@@ -1452,12 +1452,15 @@ function compareDeltaValue(a, deltaVal, hbVal, baseAbsolute, gapValue) {
 
 async function patternMatchExtract(sa, searchText, minLength, maxGap) {
   let we; // WordEntry
+  const ANY_MARK = { anyMark: true };   // the glyph token "~": any mark glyph (the font's mark class)
   function buildPatternSourceArray(txt) {
     const sarr = splitInfoToGlyphs(txt);
     for (let i=0; i<sarr.length; i++) {
       const rule = sarr[i].glyph;
       if (rule.startsWith('/') && rule.endsWith('/')) {
         sarr[i].glyph = new RegExp(rule.slice(1, -1), 'u');
+      } else if (rule === '~') {
+        sarr[i].glyph = ANY_MARK;
       }
     }
     return sarr;
@@ -1475,7 +1478,9 @@ async function patternMatchExtract(sa, searchText, minLength, maxGap) {
     const ga = a.glyph;
     const gb = b.glyph;
     let res = b.invert;
-    if (typeof gb !== 'object') {
+    if (gb === ANY_MARK) {
+      res ^= !!wordList.hbs.isGlyphMark(we.hb[a.index].g);
+    } else if (typeof gb !== 'object') {
       res ^= (gb === ga);
     } else {
       res ^= gb.test(ga);
@@ -2664,6 +2669,10 @@ function buildPatternBins() {
             <h3>RegExp</h3>            
             Use `<span class="mono"><font color='red'>/</font>...<font color='red'>/</font></span>` for regular expressions.
             <br/>e.g. `<span class='mono'><font color='red'>/.+/</font></span>` to find any glyph.
+
+            <h3>Any mark</h3>
+            Use `<span class="mono"><font color='red'>~</font></span>` for any mark glyph (the font's mark class), or `<span class="mono"><font color='red'>!~</font></span>` for any glyph that is not a mark.
+            <br/>e.g. `<span class='mono'>*~&lt;dy:-40&gt;</span>` or `<span class='mono'>BEi1 ~</span>`
           </div>
         </div>
       </td>
@@ -3071,7 +3080,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-10-24 1310
+<br/>2026-10-25 2140
 </body>
 
 
