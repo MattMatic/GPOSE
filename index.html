@@ -1811,6 +1811,7 @@ function patternIsApplyMode() {
 }
 
 function inpPatternChanged(e) {
+  cbPatternList.disabled = !patternIsApplyMode();    // only meaningful for Apply Changes
   if (patternIsApplyMode()) {
     btnPatternApply.innerHTML = '<u>A</u>pply Changes';
     btnPatternApply.title = 'Hold Ctrl key to merge into pattern list';
@@ -1869,7 +1870,10 @@ async function patternApply(event) {
   // Shift only means "subtract" in "Save to Pattern List" mode (no deltas are changed, so the
   // matched words are simply removed from the list). In "Apply Changes" mode Shift is ignored.
   const subtract = event.shiftKey && !patternIsApplyMode();
-  if (subtract) {
+  const keepList = patternIsApplyMode() && !cbPatternList.checked;   // "Pattern List" unchecked: leave the list alone
+  if (keepList) {
+    // the Pattern List is not modified
+  } else if (subtract) {
     const remove = new Set(edited);
     const before = wordList.filtered.pattern.length;
     wordList.filtered.pattern = wordList.filtered.pattern.filter(v => !remove.has(v)); // order preserved
@@ -1892,7 +1896,7 @@ async function patternApply(event) {
   if (subtract)
     window.alert(`Removed from Pattern List: ${removed}\r\nPattern List now: ${wordList.filtered.pattern.length}`);
   else
-    window.alert(`Changed: ${changed}\r\nBetter: ${better}\r\nLeft: ${unchanged}`);
+    window.alert(`Changed: ${changed}\r\nBetter: ${better}\r\nLeft: ${unchanged}` + (keepList ? '\r\n(Pattern List not changed)' : ''));
 }
 
 async function patternCopy(event) {
@@ -2702,6 +2706,7 @@ function buildPatternBins() {
       <td>
         <button id='btnPatternApply' title='Hold Ctrl key to merge into pattern list' style='background-color:#f83; color:white;'>Apply Changes</button>
         <input type='checkbox' id='cbForceApply' checked><label for='cbForceApply'>F<u>o</u>rce changes</label>
+        <input type='checkbox' id='cbPatternList' checked><label for='cbPatternList' title='Checked: the matched words replace (or, with Ctrl, join) the Pattern List. Unchecked: the changes are applied but the Pattern List is left as it is. Only used by Apply Changes.'>Pattern List</label>
       </td>
       <td>
         <button id='btnPatternCopy'>Copy List</button>
@@ -3080,7 +3085,7 @@ let inpPatternMRU = TextareaMRU.attach(inpPattern, {
 
 </script>
 
-<br/>2026-10-26 0800
+<br/>2026-10-26 0900
 </body>
 
 
