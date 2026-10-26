@@ -76,7 +76,6 @@ const ProximityPanel = (() => {
       #proximityPanel table.px-form .px-gl .px-pop { left:0; }
       #proximityPanel .px-pop code { font-family:monospace; background:#eed; padding:0 3px; }
       #proximityPanel table.px-form th { text-align:left; font-weight:normal; color:#666; font-size:11px; padding:0 4px; }
-      #proximityPanel .px-hintbox:hover .px-pop, #proximityPanel .px-hintbox:focus-within .px-pop,
       #proximityPanel .px-hintbox.open .px-pop { display:block; }
     `;
     document.head.appendChild(style);
@@ -150,10 +149,15 @@ const ProximityPanel = (() => {
     q('.px-close').onclick = hide;
     q('.px-scan').onclick = scan;
     q('.px-defaults').onclick = resetDefaults;
-    panel.querySelectorAll('.px-hint').forEach(h => {                       // hover / focus show a hint; click or Enter pins it (touch, keyboard)
+    panel.querySelectorAll('.px-hint').forEach(h => {                       // a hint opens only when its "?" is pressed (click, Enter or Space)
       h.addEventListener('click', (e) => { e.currentTarget.parentElement.classList.toggle('open'); });
       h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); } });
     });
+    document.addEventListener('mousedown', (e) => {                         // a click anywhere else closes an open hint
+      if (e.target.closest && e.target.closest('.px-hint, .px-pop')) return;
+      closeHints();
+    });
+    panel.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHints(); });
     for (const f of ['.px-g1', '.px-g2', '.px-dist-to']) {                  // typing in a field closes its hint
       q(f).addEventListener('input', () => q(f).closest('.px-hintbox').classList.remove('open'));
     }
@@ -201,6 +205,10 @@ const ProximityPanel = (() => {
       if (!o) return;
       for (const f of FIELDS) { const el = q('.px-' + f); if (el && f in o) { if (el.type === 'checkbox') el.checked = !!o[f]; else el.value = o[f]; } }
     } catch (e) { /* ignore */ }
+  }
+
+  function closeHints() {
+    if (panel) panel.querySelectorAll('.px-hintbox.open').forEach(b => b.classList.remove('open'));
   }
 
   // Every setting back to its default; the saved copy is forgotten (the results are left as they are)
@@ -267,16 +275,20 @@ const ProximityPanel = (() => {
     const limit = cd.to !== null ? cd.to + 0.001 : range;             // "to" itself is inside the range
     const componentTest = active(cx) || active(cy);
 
-    // distance, X and Y of a pair, or null if they are further apart than the search range
-    const measurePair = (A, B) => {
-      if (!boxMode) return GlyphQuery.closest(A, B, limit);
+    // The exact distance, X and Y of a pair, or null if they are further apart than `lim`
+    const measureExact = (A, B, lim = limit) => {
+      if (!boxMode) return GlyphQuery.closest(A, B, lim);
       const d = GlyphQuery.boxDistance(A, B);
-      if (!(d < limit)) return null;
+      if (!(d < lim)) return null;
       const a = A.box, b = B.box;
       return { d, dx: (b.x0 + b.x1) / 2 - (a.x0 + a.x1) / 2, dy: (b.y0 + b.y1) / 2 - (a.y0 + a.y1) / 2, nested: null };
     };
+    // The gap between two glyphs' boxes is never more than the distance between their outlines, so it can rule a pair out
+    // (gap >= the search range) or, for an open-ended distance with no X / Y range, rule it IN (gap >= "from") without
+    // measuring the outlines at all. Such a pair is measured exactly only if it turns out to be the one shown for its word.
+    const gapDecides = !boxMode && !componentTest && cd.to === null;
 
-    // does this pair satisfy every active range? c = GlyphQuery.closest(...) or null (further than the search range)
+    // does this pair satisfy every active range? c = a measurement, or null (further than the search range)
     const ok = (c) => {
       if (!c) return cd.to === null && !componentTest;                // far away: only an open-ended distance can hold
       return passes(cd, c.d) && passes(cx, c.dx) && passes(cy, c.dy);
@@ -291,7 +303,12 @@ const ProximityPanel = (() => {
         if (!g1s.length) return null;
         const g2s = w.glyphs.filter(g => g.outline && m2(g.name, g.mark));
         if (!g2s.length) return null;
-        let best = null;
+        let best = null;                                              // the matching pair shown for this word: { d, A, B, c }
+        const consider = (A, B, c) => {
+          if (!ok(c)) return;
+          const d = c ? c.d : Infinity;
+          if (!best || d < best.d) best = { d, A, B, c };
+        };
         for (const A of g1s) {
           // the Glyph 2 glyphs this Glyph 1 is compared with
           const others = g2s.filter(B => B !== A && related(A, B));                               // only glyphs with the chosen relation
@@ -300,23 +317,33 @@ const ProximityPanel = (() => {
           else if (pick === 'left') cands = others.filter(B => B.i < A.i).slice(-1);              // first before A, looking left
           else cands = others;
           if (!cands.length) continue;
-          let use = cands.map(B => ({ B, c: measurePair(A, B) }));
+          const gaps = cands.map(B => ({ B, gap: GlyphQuery.boxDistance(A, B) }));
           if (pick === 'nearest') {
-            const key = (r) => r.c ? r.c.d : 1e12 + GlyphQuery.boxDistance(A, r.B);               // out of range: nearest box first
-            use = [use.reduce((p, r) => key(r) < key(p) ? r : p)];
-          }
-          for (const { B, c } of use) {
-            if (!ok(c)) continue;
-            if (!best || (c ? c.d : Infinity) < best.d) {
-              best = { d: c ? c.d : Infinity,
-                       row: { glyph1: `#${A.i} ${A.name}`, glyph2: `#${B.i} ${B.name}`,
-                              distance: c ? Math.round(c.d * 10) / 10 : `>${Math.round(limit)}`,
-                              x: c ? Math.round(c.dx) : '-', y: c ? Math.round(c.dy) : '-',
-                              note: c && c.nested ? 'inside' : (c && c.d === 0 ? 'overlap' : '') } };
+            // best first: the smallest box gap, then only candidates whose gap could still beat the best found so far
+            gaps.sort((p, r) => p.gap - r.gap);
+            let lim = limit, bestC = null, bestB = null;
+            for (const { B, gap } of gaps) {
+              if (gap >= lim) break;
+              const c = measureExact(A, B, lim);
+              if (c && (!bestC || c.d < bestC.d)) { bestC = c; bestB = B; lim = c.d; }
+            }
+            if (bestC) consider(A, bestB, bestC); else consider(A, gaps[0].B, null);              // nothing in range: it is far away
+          } else {
+            for (const { B, gap } of gaps) {
+              if (gap >= limit) consider(A, B, null);                                             // out of range
+              else if (gapDecides && (cd.from === null || gap >= cd.from)) consider(A, B, { d: gap, lazy: true });
+              else consider(A, B, measureExact(A, B));
             }
           }
         }
-        return best ? best.row : null;
+        if (!best) return null;
+        const { A, B } = best;
+        let c = best.c;
+        if (c && c.lazy) c = measureExact(A, B);                      // exact numbers for the row (null if beyond the range after all)
+        return { glyph1: `#${A.i} ${A.name}`, glyph2: `#${B.i} ${B.name}`,
+                 distance: c ? Math.round(c.d * 10) / 10 : `>${Math.round(limit)}`,
+                 x: c ? Math.round(c.dx) : '-', y: c ? Math.round(c.dy) : '-',
+                 note: c && c.nested ? 'inside' : (c && c.d === 0 ? 'overlap' : '') };
       },
     });
     state.hits = res.hits;

@@ -94,7 +94,9 @@ or the same / different cursive run (the default is different cursive runs), or 
 glyph it is attached to. "Measure" switches the three values between the outlines' nearest points and the glyphs' bounding boxes
 (box gap, and the offset between the box centres, so two overlapping marks still have a height order - the kasra check can be set up
 this way: Glyph 1 `/^KASRA/`, Glyph 2 `/^(sdb|ddb|tdb)/`, any match, "any (no restriction)" - or the same base glyph, to match the
-snippet's `SAME = 'base'` - Y to -1, X `abs` to the snippet's `MAX_X_MID`). The **Defaults** button puts every setting back to its default and forgets the saved settings. See the notes at the top of the file.
+snippet's `SAME = 'base'` - Y to -1, X `abs` to the snippet's `MAX_X_MID`). The **Defaults** button puts every setting back to its default and forgets the saved settings. The `?` hints open only when pressed.
+Box gaps are used to skip work: pairs whose boxes are further apart than the search range are never measured, the nearest Glyph 2 is found
+best-first, and an open-ended distance whose box gap already passes "from" is measured exactly only for the pair shown. See the notes at the top of the file.
 
 ## Notes for the snippets
 

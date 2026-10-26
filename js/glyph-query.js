@@ -243,6 +243,7 @@ const GlyphQuery = (() => {
    */
   const closest = (a, b, limit = Infinity) => {
     if (!a.outline || !b.outline) return null;
+    if (boxGap(a.box, 0, 0, b.box, 0, 0) >= limit) return null;                 // the boxes alone put them out of range
     const out = { found: false, nested: null };
     const d = outlineSearch(a.outline, a.px, a.py, b.outline, b.px, b.py, limit, out);
     if (!out.found && !out.nested) return d < limit || d === 0 ? { d, a: null, b: null, dx: 0, dy: 0, touching: d === 0, nested: null } : null;
