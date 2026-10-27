@@ -199,7 +199,7 @@ class FontForceField {
     function isClusterOverlap(i1, e1, i2, e2) {
       if (e1.cl != e2.cl) return false;
       // Check whether e1.g or e2.g are in the JSON set that allow same cluster overlaps
-      return (thisObj.getGlyphData(e1.g)?.cl || thisObj.getGlyphData(e2.g)?.cl);
+      return (thisObj.getGlyphData(e1.g)?.clusterOverlap && thisObj.getGlyphData(e2.g)?.clusterOverlap);
     }
 
     const collisionParts = [];
