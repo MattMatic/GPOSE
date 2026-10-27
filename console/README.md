@@ -9,6 +9,7 @@ which the app loads, so a new snippet is mostly its settings and one test functi
 | `nukta-division.js` | nuktas separated from their own cursive run, under the start of a REf/DALf/VAO, with free space to their left |
 | `kasra-check.js` | two kinds of mark in the same x-region but vertically the wrong way round (KASRA higher than an sdb/ddb/tdb; an sda/dda/tda higher than a FATHA/DAMMA/SHADDA/HAMZA_ABOVE), by bounding-box y-mid |
 | `outline-distance.js` | marks too close to each other, or too far from the base run (outline distance, with a distribution to set thresholds from) |
+| `forcefield-diagnose.js` | for words whose glyph outlines overlap but the force field did not flag it: replays the force field's pair test and says which stage let the pair through (attachment indexes, stored v fresh evaluation, exemptions, the test used, the fields) |
 
 ## Writing a snippet
 

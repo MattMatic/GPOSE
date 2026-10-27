@@ -190,16 +190,16 @@ class FontForceField {
       } else {
         mark = e2; base = e1;
       }
-      const nearBase = mark.gf.getField('nearBase');
-      const near = base.gf.getField('near');
-      if (nearBase) return nearBase.collisionCPath(near);
-      return mark.gf.getField().collisionCPath(near);
+      const markNearBase = mark.gf.getField('nearBase');
+      const baseNear = base.gf.getField('near');
+      if (markNearBase) return baseNear.collisionCPath(markNearBase);
+      return baseNear.collisionCPath(mark.gf.getField());
     }
 
     function isClusterOverlap(i1, e1, i2, e2) {
       if (e1.cl != e2.cl) return false;
       // Check whether e1.g or e2.g are in the JSON set that allow same cluster overlaps
-      return (thisObj.getGlyphData(e1.g)?.cl || thisObj.getGlyphData(e2.g)?.cl);
+      return (thisObj.getGlyphData(e1.g)?.clusterOverlap && thisObj.getGlyphData(e2.g)?.clusterOverlap);
     }
 
     const collisionParts = [];
@@ -395,8 +395,8 @@ class FontForceField {
       shapingFields.fields = {};
       shapingFields.fields.collisionsGlyphs = collisionsGlyphs;
       shapingFields.fields.collisions   = collisions;
-      shapingFields.fields.overallMarks = overallMarks;
-      shapingFields.fields.overallFar = overallFar;
+      shapingFields.fields.overallMarks = overallMarks; 
+     shapingFields.fields.overallFar = overallFar;
       shapingFields.fields.overallAll = overallAll;
     } else {
       collisionsGlyphs.freePath();
@@ -460,9 +460,10 @@ class FontForceField {
   buildGlyphFields(gid) {
     const hbg = this.hbg;
     const gv = this.jsonGetGlyphValues(gid);
+    const isMark = hbs.isGlyphMark(gid);
     hbg.addField(gid, 'near', gv.near);
     hbg.addField(gid, 'far',  gv.far);
-    if (typeof gv.nearBase === 'number') {
+    if (isMark && (typeof gv.nearBase === 'object')) {
       hbg.addField(gid, 'nearBase', gv.nearBase);
     }
     if (this.glyphInBars(gid)) {
@@ -965,8 +966,14 @@ class FontForceField {
 
       // Merge options: const merged = {...options, ...seconds, ...thirds}
       if (showNear) {
-        const f = gf.getField('near');
-        if (f) svg += f.toSVG({...options, ...{strokeColor:'#4d4',}});
+        const f = gf.getField('nearBar');
+        if (f) {
+          // Show nearBar for Indic, rather than near
+          svg += f.toSVG({...options, ...{strokeColor:'#4d4',}});
+        } else {
+          const f = gf.getField('near');
+          if (f) svg += f.toSVG({...options, ...{strokeColor:'#4d4',}});          
+        }
       }
       if (showNearBase) {
         const f = gf.getField('nearBase');
