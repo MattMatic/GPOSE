@@ -13,14 +13,14 @@
 //
 // Relies on globals from index.html: wordList, setPatternList, patternMatchShow, patternMatchFind,
 // patternMatchExtract, inpPattern, txtMinMatch, txtMaxGap, inpPatternChanged, breadCrumbAdd,
-// refreshSVG, radClass* (the active list), FORCEFIELD_QUALITY is not needed (ratings are 0..4).
+// refreshSVG, radClass* (the active list), PlacementCore (js/placement-core.js, loaded first).
+// FORCEFIELD_QUALITY is not needed (ratings are 0..4).
 'use strict';
 
 const PlacementPanel = (() => {
   const SLOTS = [-3, -2, -1, 1, 2, 3];
   const Q_COLOURS = ['#7c7', '#dd5', '#f93', '#f44', '#c3c'];
   const Q_NAMES = ['OK', 'Maybe', 'Kerning', 'Near', 'Collision'];
-  const FORM_RE = /^[A-Z]+([imfu])(?=\d|\.|$)/;   // Gulzar naming: LETTER + form + variant (BEi15)
   const NS = 'http://www.w3.org/2000/svg';
   const LISTS = [['all', 'All'], ['collision', 'Collision'], ['near', 'Near'], ['kerning', 'Kerning'],
                  ['maybe', 'Maybe'], ['pattern', 'Pattern'], ['edited', 'Edited']];
@@ -37,9 +37,7 @@ const PlacementPanel = (() => {
 
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
-  const fam = (n) => (n === undefined ? '^' : n.replace(/\d+$/, ''));
-  const form = (n) => (n === undefined ? '.' : (FORM_RE.exec(n)?.[1] ?? '-'));
-  const num = (x) => (typeof x === 'number' && !isNaN(x) ? x : 0);
+  const { fam, form, num, tierOf } = PlacementCore;   // js/placement-core.js (glyph family, i/m/f/u form, height tier)
 
   // '' -> null (any glyph); '/re/' -> regexp; 'name' -> exact; leading '!' inverts
   function compileMatcher(text) {
@@ -62,13 +60,6 @@ const PlacementPanel = (() => {
     const f = fam(name);
     return f === name ? name : `/^${escRe(f)}\\d+$/`;
   }
-
-  // Round a height to the nearest multiple of `size` (no -0)
-  const tierOf = (h, size) => {
-    const sz = size > 0 ? size : 100;
-    const t = Math.round(h / sz) * sz;
-    return t === 0 ? 0 : t;
-  };
 
   const GROUPS = {
     none:    { label: 'None',                 key: () => '(all)' },
