@@ -10,6 +10,7 @@ which the app loads, so a new snippet is mostly its settings and one test functi
 | `kasra-check.js` | two kinds of mark in the same x-region but vertically the wrong way round (KASRA higher than an sdb/ddb/tdb; an sda/dda/tda higher than a FATHA/DAMMA/SHADDA/HAMZA_ABOVE), by bounding-box y-mid |
 | `outline-distance.js` | marks too close to each other, or too far from the base run (outline distance, with a distribution to set thresholds from) |
 | `forcefield-diagnose.js` | for words whose glyph outlines overlap but the force field did not flag it: replays the force field's pair test and says which stage let the pair through (attachment indexes, stored v fresh evaluation, exemptions, the test used, the fields) |
+| `consistency.js` | placements that disagree with how the same glyph is placed in the same context across the word list - every mark (offset from its base) and every base (advance), final position = HarfBuzz + GPOSE delta; says whether the outlier was edited (possible wrong edit) or not (possible missed correction), and lists contexts that are mostly human-edited (rule candidates). Built on `ConsistencyCheck` (`js/consistency-check.js`), not `GlyphQuery`; `ConsistencyCheck.peers(n)` shows the group behind row n |
 
 ## Writing a snippet
 

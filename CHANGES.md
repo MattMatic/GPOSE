@@ -1,5 +1,9 @@
 Changes
 -------
+# 2026-11-01
++ Added console/consistency.js (ConsistencyCheck, js/consistency-check.js) - flags marks and base advances that differ from the same glyph in the same context across the list, edited or not, and reports rule candidates
++ Added js/placement-core.js (PlacementCore) - helpers shared by the Placement panel and the consistency check
+
 # 2026-10-26
 + Bulk Apply: new "Pattern List" checkbox beside "Force changes" - untick it to apply the changes without modifying the Pattern List
 
